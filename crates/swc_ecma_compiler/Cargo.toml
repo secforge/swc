@@ -14,7 +14,9 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(swc_ast_unknown)'] }
 
 [dependencies]
 bitflags   = { workspace = true }
+indexmap   = { workspace = true }
 rustc-hash = { workspace = true }
+serde      = { workspace = true }
 tracing    = { workspace = true }
 
 swc_atoms                = { version = "9.0.0", path = "../swc_atoms" }
