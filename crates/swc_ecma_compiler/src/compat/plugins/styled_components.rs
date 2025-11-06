@@ -916,7 +916,7 @@ fn minify_template_literal(lit: &mut Tpl) {
 
     let quasis = &mut lit.quasis[..];
     for quasi_index in 0..quasis.len() {
-        let mut bytes = quasis[quasi_index].raw.as_str().as_bytes().to_vec();
+        let bytes = quasis[quasi_index].raw.as_str().as_bytes().to_vec();
         let mut bytes = bytes.as_slice();
 
         if quasi_index > 0 {

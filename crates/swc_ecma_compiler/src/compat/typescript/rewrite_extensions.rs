@@ -5,7 +5,6 @@
 //!
 //! Based on Babel's [plugin-rewrite-ts-imports](https://github.com/babel/babel/blob/3bcfee232506a4cebe410f02042fb0f0adeeb0b1/packages/babel-preset-typescript/src/plugin-rewrite-ts-imports.ts)
 
-use swc_atoms::Atom;
 use swc_ecma_ast::*;
 use swc_ecma_visit::{noop_visit_mut_type, VisitMut};
 
@@ -21,7 +20,9 @@ impl TypeScriptRewriteExtensions {
     }
 
     pub fn rewrite_extensions(&self, source: &mut Str) {
-        let value = source.value.as_str();
+        let Some(value) = source.value.as_str() else {
+            return;
+        };
         if !value.contains(['/', '\\']) {
             return;
         }

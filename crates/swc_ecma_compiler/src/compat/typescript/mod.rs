@@ -41,7 +41,7 @@ use annotations::TypeScriptAnnotations;
 use class::TypeScriptClass;
 use module::TypeScriptModule;
 use namespace::TypeScriptNamespace;
-pub use options::{RewriteExtensionsMode, TypeScriptOptions};
+pub use options::TypeScriptOptions;
 use r#enum::TypeScriptEnum;
 use rewrite_extensions::TypeScriptRewriteExtensions;
 

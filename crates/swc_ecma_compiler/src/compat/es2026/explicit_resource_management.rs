@@ -39,7 +39,7 @@ use std::mem;
 use rustc_hash::FxHashMap;
 use swc_common::{SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_utils::{private_ident, quote_ident};
+use swc_ecma_utils::private_ident;
 use swc_ecma_visit::{VisitMut, VisitMutWith};
 
 pub struct ExplicitResourceManagement {
@@ -173,9 +173,9 @@ impl ExplicitResourceManagement {
 
     /// Transform using declarations in a list of statements
     fn transform_statements(&mut self, stmts: &mut Vec<Stmt>) -> Option<(Vec<Stmt>, bool, Ident)> {
-        let mut needs_await = false;
-        let mut using_ctx: Option<Ident> = None;
-        let mut found_using = false;
+        let needs_await = false;
+        let using_ctx: Option<Ident> = None;
+        let found_using = false;
 
         for stmt in stmts.iter_mut() {
             if let Stmt::Decl(Decl::Var(var_decl)) = stmt {
@@ -364,8 +364,8 @@ impl VisitMut for ExplicitResourceManagement {
     fn visit_mut_switch_stmt(&mut self, n: &mut SwitchStmt) {
         n.visit_mut_children_with(self);
 
-        let mut using_ctx: Option<Ident> = None;
-        let mut needs_await = false;
+        let using_ctx: Option<Ident> = None;
+        let needs_await = false;
 
         for case in &mut n.cases {
             for stmt in &mut case.cons {

@@ -38,7 +38,7 @@ pub use options::DecoratorOptions;
 use swc_ecma_ast::*;
 use swc_ecma_visit::{VisitMut, VisitMutWith};
 
-use crate::compat::{TransformCtx, TransformState};
+use crate::compat::TransformCtx;
 
 /// Decorator transformation
 ///
