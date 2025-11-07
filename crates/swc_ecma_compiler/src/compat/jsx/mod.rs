@@ -41,9 +41,9 @@ mod refresh;
 pub use comments::update_options_with_comments;
 use display_name::ReactDisplayName;
 use jsx_impl::JsxImpl;
-pub use options::JsxOptions;
 #[allow(unused_imports)]
 pub use options::JsxRuntime;
+pub use options::{JsxOptions, ReactRefreshOptions};
 use refresh::ReactRefresh;
 
 use crate::compat::context::TransformCtx;

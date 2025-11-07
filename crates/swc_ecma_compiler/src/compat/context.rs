@@ -6,7 +6,10 @@ use std::{
 
 use swc_ecma_ast::EsVersion;
 
-use crate::{compat::common::statement_injector::StatementInjectorStore, Config};
+use crate::{
+    compat::{common::statement_injector::StatementInjectorStore, options::TransformOptions},
+    Config,
+};
 
 /// Transform context for SWC-based transformations.
 ///
@@ -41,12 +44,33 @@ pub struct TransformCtx {
 }
 
 impl TransformCtx {
+    /// Create a new transform context from transform options.
+    ///
+    /// This is the primary constructor for use with the compat layer.
+    ///
+    /// # Arguments
+    /// * `options` - Transform options specifying which transforms to enable
+    pub fn new(options: &TransformOptions) -> Self {
+        Self {
+            errors: RefCell::new(vec![]),
+            filename: String::from("input"),
+            source_path: PathBuf::from("input.js"),
+            target: EsVersion::Es5, // TODO: Extract from options.env
+            source_text: "",
+            assumptions: swc_ecma_transforms_base::assumptions::Assumptions::default(),
+            statement_injector: StatementInjectorStore::new(),
+            is_class_properties_plugin_enabled: options.env.es2022.class_properties.is_some(),
+        }
+    }
+
     /// Create a new transform context from a source path and configuration.
+    ///
+    /// This is the legacy constructor for compatibility with existing code.
     ///
     /// # Arguments
     /// * `source_path` - Path to the source file being transformed
     /// * `config` - Compiler configuration containing assumptions and features
-    pub fn new(source_path: &Path, config: &Config) -> Self {
+    pub fn from_config(source_path: &Path, config: &Config) -> Self {
         let filename = source_path
             .file_stem() // omit file extension
             .map_or_else(
