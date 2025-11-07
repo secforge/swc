@@ -26,6 +26,7 @@
 //! - ES2019 specification: <https://262.ecma-international.org/10.0/>
 //! - Babel preset-env: <https://babeljs.io/docs/babel-preset-env>
 
+#![allow(dead_code)]
 use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;
 

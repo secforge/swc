@@ -59,6 +59,7 @@
 //! - Babel plugin: <https://github.com/styled-components/babel-plugin-styled-components>
 //! - Documentation: <https://styled-components.com/docs/tooling#babel-plugin>
 
+#![allow(dead_code)]
 use std::hash::{Hash, Hasher};
 
 use rustc_hash::FxHasher;
@@ -704,7 +705,7 @@ impl StyledComponents<'_> {
             if block_name == component_name {
                 component_name
             } else {
-                Atom::from(format!("{}__{}", block_name, component_name))
+                Atom::from(format!("{block_name}__{component_name}"))
             }
         } else {
             block_name
@@ -876,10 +877,10 @@ fn minify_template_literal(lit: &mut Tpl) {
     use swc_common::BytePos;
 
     const NOT_IN_STRING: u8 = 0;
-    /// `Span` used as a sentinel indicating quasi should be removed.
-    /// Source text is limited to max `u32::MAX` bytes, so it's impossible for a
-    /// `TplElement` to have this span, because it's always followed by (at
-    /// minimum) a '`'.
+    // `Span` used as a sentinel indicating quasi should be removed.
+    // Source text is limited to max `u32::MAX` bytes, so it's impossible for a
+    // `TplElement` to have this span, because it's always followed by (at
+    // minimum) a '`'.
     let remove_sentinel = Span::new(BytePos(u32::MAX), BytePos(u32::MAX));
 
     debug_assert!(lit.quasis.len() == lit.exprs.len() + 1);

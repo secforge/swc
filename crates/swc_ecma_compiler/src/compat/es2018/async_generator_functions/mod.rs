@@ -3,7 +3,7 @@
 //! This plugin mainly does the following transformations:
 //!
 //! 1. transforms async generator functions (async function *name() {}) to
-//!    generator functions and wraps them with `awaitAsyncGenerator` helper
+//!    generator functions and wraps them with `wrapAsyncGenerator` helper
 //!    function.
 //! 2. transforms `await expr` expression to `yield awaitAsyncGenerator(expr)`.
 //! 3. transforms `yield * argument` expression to `yield
@@ -66,64 +66,30 @@
 //! * Babel docs: <https://babeljs.io/docs/en/babel-plugin-transform-async-generator-functions>
 //! * Babel implementation: <https://github.com/babel/babel/blob/v7.26.2/packages/babel-plugin-transform-async-generator-functions>
 //! * Async Iteration TC39 proposal: <https://github.com/tc39/proposal-async-iteration>
-//!
-//! ## Implementation Status
-//!
-//! This is a stub implementation. The oxc version is approximately 236 lines
-//! and includes:
-//!
-//! - Transformation of async generator function expressions and declarations
-//! - Transformation of await expressions inside async generators
-//! - Transformation of yield* expressions inside async generators
-//! - Transformation of for-await statements (in for_await.rs)
-//! - Integration with an `AsyncGeneratorExecutor` from es2017
-//!
-//! Key challenges in porting to SWC:
-//! 1. The executor pattern from es2017 needs to be available
-//! 2. Complex expression and statement transformations
-//! 3. Helper function injection (AsyncIterator, AwaitAsyncGenerator, etc.)
-//! 4. Scope tracking to determine if we're inside an async generator
-//! 5. Statement injection for function declarations
-//!
-//! The transformation logic relies heavily on:
-//! - Arena allocation and lifetimes
-//! - oxc's Traverse trait and TraverseCtx
-//! - Helper loaders for runtime functions
-//! - Ancestor walking to check context
-//!
-//! To fully implement this in SWC:
-//! 1. Port the AsyncGeneratorExecutor from es2017
-//! 2. Implement VisitMutHook methods for expressions, statements, and functions
-//! 3. Track async generator context during traversal
-//! 4. Use SWC's helper injection mechanism
-//! 5. Handle all edge cases (class methods, export declarations, etc.)
 
+#![allow(dead_code)]
 mod for_await;
 
+use std::mem;
+
+use swc_common::DUMMY_SP;
+use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;
 
-use crate::compat::context::TransformCtx;
+use crate::compat::{
+    common::helper_loader::Helper, context::TransformCtx, es2017::AsyncGeneratorExecutor,
+};
 
 /// Async generator functions transformer for ES2018.
 ///
 /// Transforms async generator functions and related syntax (await in
 /// generators, yield* in async generators, for-await loops) to ES5-compatible
 /// code.
-///
-/// # Note
-///
-/// This is a stub implementation. The actual transformation logic is extremely
-/// complex and would require:
-/// - An AsyncGeneratorExecutor (from es2017 transformations)
-/// - Helper function management
-/// - Complex AST rewriting
-/// - Scope and context tracking
-///
-/// For production use, consider using SWC's existing async/generator transforms
-/// in `swc_ecma_transforms_compat`.
 pub struct AsyncGeneratorFunctions<'ctx> {
-    #[allow(dead_code)]
     ctx: &'ctx TransformCtx,
+    executor: AsyncGeneratorExecutor<'ctx>,
+    /// Track the depth of async generator functions to determine context
+    async_generator_depth: usize,
 }
 
 impl<'ctx> AsyncGeneratorFunctions<'ctx> {
@@ -133,40 +99,170 @@ impl<'ctx> AsyncGeneratorFunctions<'ctx> {
     ///
     /// * `ctx` - Transform context containing shared state and utilities
     pub fn new(ctx: &'ctx TransformCtx) -> Self {
-        Self { ctx }
+        Self {
+            ctx,
+            executor: AsyncGeneratorExecutor::new(Helper::WrapAsyncGenerator, ctx),
+            async_generator_depth: 0,
+        }
+    }
+
+    /// Transform `yield * argument` expression to `yield
+    /// asyncGeneratorDelegate(asyncIterator(argument))`.
+    fn transform_yield_expression(&mut self, expr: &mut YieldExpr) -> Option<Expr> {
+        if !expr.delegate || self.async_generator_depth == 0 {
+            return None;
+        }
+
+        expr.arg.as_mut().map(|argument| {
+            let arg = mem::take(&mut **argument);
+            // asyncIterator(argument)
+            let arg = Expr::Call(CallExpr {
+                span: DUMMY_SP,
+                ctxt: Default::default(),
+                callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                    span: DUMMY_SP,
+                    obj: Box::new(Expr::Ident(Ident::new(
+                        "babelHelpers".into(),
+                        DUMMY_SP,
+                        Default::default(),
+                    ))),
+                    prop: MemberProp::Ident(IdentName::new(
+                        Helper::AsyncIterator.name().into(),
+                        DUMMY_SP,
+                    )),
+                }))),
+                args: vec![ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(arg),
+                }],
+                type_args: None,
+            });
+
+            // asyncGeneratorDelegate(asyncIterator(argument))
+            let arg = Expr::Call(CallExpr {
+                span: DUMMY_SP,
+                ctxt: Default::default(),
+                callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                    span: DUMMY_SP,
+                    obj: Box::new(Expr::Ident(Ident::new(
+                        "babelHelpers".into(),
+                        DUMMY_SP,
+                        Default::default(),
+                    ))),
+                    prop: MemberProp::Ident(IdentName::new(
+                        Helper::AsyncGeneratorDelegate.name().into(),
+                        DUMMY_SP,
+                    )),
+                }))),
+                args: vec![ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(arg),
+                }],
+                type_args: None,
+            });
+
+            Expr::Yield(YieldExpr {
+                span: DUMMY_SP,
+                arg: Some(Box::new(arg)),
+                delegate: expr.delegate,
+            })
+        })
+    }
+
+    /// Transforms `await expr` expression to `yield awaitAsyncGenerator(expr)`.
+    fn transform_await_expression(&mut self, expr: &mut AwaitExpr) -> Option<Expr> {
+        if self.async_generator_depth == 0 {
+            return None;
+        }
+
+        let arg = mem::take(&mut *expr.arg);
+        // awaitAsyncGenerator(expr)
+        let arg = Expr::Call(CallExpr {
+            span: DUMMY_SP,
+            ctxt: Default::default(),
+            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                span: DUMMY_SP,
+                obj: Box::new(Expr::Ident(Ident::new(
+                    "babelHelpers".into(),
+                    DUMMY_SP,
+                    Default::default(),
+                ))),
+                prop: MemberProp::Ident(IdentName::new(
+                    Helper::AwaitAsyncGenerator.name().into(),
+                    DUMMY_SP,
+                )),
+            }))),
+            args: vec![ExprOrSpread {
+                spread: None,
+                expr: Box::new(arg),
+            }],
+            type_args: None,
+        });
+
+        Some(Expr::Yield(YieldExpr {
+            span: DUMMY_SP,
+            arg: Some(Box::new(arg)),
+            delegate: false,
+        }))
     }
 }
 
 impl VisitMutHook for AsyncGeneratorFunctions<'_> {
-    // TODO: Implement async generator function transformation using SWC's
-    // VisitMutHook pattern.
-    //
-    // Key methods from oxc that need to be ported:
-    //
-    // exit_expression:
-    //   - Transform AwaitExpression in async generators to yield expressions
-    //   - Transform YieldExpression with delegate in async generators
-    //   - Transform async generator FunctionExpression
-    //
-    // enter_statement:
-    //   - Transform for-await statements (delegates to for_await.rs logic)
-    //
-    // exit_statement:
-    //   - Transform async generator FunctionDeclaration
-    //   - Handle export default/named declarations with async generator functions
-    //
-    // exit_function:
-    //   - Transform async generator methods in classes
-    //
-    // Each transformation needs to:
-    // 1. Detect if we're in an async generator context
-    // 2. Transform the node appropriately
-    // 3. Potentially inject helper calls
-    // 4. Handle scope and binding correctly
-    //
-    // Helper methods that need porting:
-    // - transform_await_expression: await -> yield awaitAsyncGenerator(expr)
-    // - transform_yield_expression: yield* -> yield asyncGeneratorDelegate(...)
-    // - async_is_inside_async_generator_function: Check traversal context
-    // - yield_is_inside_async_generator_function: Check traversal context
+    fn enter_function(&mut self, func: &mut Function) {
+        if func.is_async && func.is_generator {
+            self.async_generator_depth += 1;
+        }
+    }
+
+    fn exit_function(&mut self, func: &mut Function) {
+        if func.is_async && func.is_generator {
+            self.async_generator_depth = self.async_generator_depth.saturating_sub(1);
+
+            // Transform async generator methods (in classes, objects, etc.)
+            // Check if this is a method by seeing if it has a body
+            if func.body.is_some() {
+                self.executor.transform_function_for_method_definition(func);
+            }
+        }
+    }
+
+    fn exit_expr(&mut self, expr: &mut Expr) {
+        let new_expr = match expr {
+            Expr::Await(await_expr) => self.transform_await_expression(await_expr),
+            Expr::Yield(yield_expr) => self.transform_yield_expression(yield_expr),
+            Expr::Fn(func_expr) => {
+                if func_expr.function.is_async && func_expr.function.is_generator {
+                    Some(self.executor.transform_function_expression(func_expr))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(new_expr) = new_expr {
+            *expr = new_expr;
+        }
+    }
+
+    fn enter_stmt(&mut self, stmt: &mut Stmt) {
+        // Handle for-await statements
+        self.transform_statement(stmt);
+    }
+
+    fn exit_stmt(&mut self, stmt: &mut Stmt) {
+        let should_transform = match stmt {
+            Stmt::Decl(Decl::Fn(func)) => func.function.is_async && func.function.is_generator,
+            _ => false,
+        };
+
+        if should_transform {
+            if let Stmt::Decl(Decl::Fn(func)) = stmt {
+                let new_statement = self.executor.transform_function_declaration(func);
+                // For now, replace the statement directly
+                // In a full implementation, we'd use statement injection
+                *stmt = new_statement;
+            }
+        }
+    }
 }

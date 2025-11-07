@@ -5,6 +5,7 @@
 //!
 //! Based on Babel's [plugin-rewrite-ts-imports](https://github.com/babel/babel/blob/3bcfee232506a4cebe410f02042fb0f0adeeb0b1/packages/babel-preset-typescript/src/plugin-rewrite-ts-imports.ts)
 
+#![allow(dead_code)]
 use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;
 
@@ -41,7 +42,7 @@ impl TypeScriptRewriteExtensions {
         source.value = if self.mode.is_remove() {
             without_extension.into()
         } else {
-            format!("{}{}", without_extension, replace).into()
+            format!("{without_extension}{replace}").into()
         };
         source.raw = None;
     }

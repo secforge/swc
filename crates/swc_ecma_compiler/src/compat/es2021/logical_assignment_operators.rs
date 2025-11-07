@@ -55,6 +55,7 @@
 //! * Babel plugin implementation: <https://github.com/babel/babel/tree/v7.26.2/packages/babel-plugin-transform-logical-assignment-operators>
 //! * Logical Assignment TC39 proposal: <https://github.com/tc39/proposal-logical-assignment>
 
+#![allow(dead_code)]
 use std::mem;
 
 use swc_atoms::Atom;

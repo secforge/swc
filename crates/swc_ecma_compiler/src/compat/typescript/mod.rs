@@ -23,6 +23,7 @@
 //! In:  `const x: number = 0;`
 //! Out: `const x = 0;`
 
+#![allow(dead_code)]
 use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;
 use swc_ecma_visit::VisitMut;
@@ -122,14 +123,11 @@ impl VisitMutHook for TypeScript<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
-    use crate::{compat::context::TransformCtx, Config};
+    use crate::compat::context::TransformCtx;
 
     fn create_test_ctx() -> TransformCtx {
-        let config = Config::default();
-        TransformCtx::new(Path::new("test.ts"), &config)
+        TransformCtx::new(&crate::compat::options::TransformOptions::default())
     }
 
     #[test]

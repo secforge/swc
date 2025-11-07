@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::compat::{
     common::helper_loader::{HelperLoaderMode, HelperLoaderOptions},
-    decorator::DecoratorOptions,
+    decorator_stub::DecoratorOptions, // Temporary stub
     es2015::ES2015Options,
     es2016::ES2016Options,
     es2017::ES2017Options,
@@ -12,7 +12,7 @@ use crate::compat::{
     es2021::ES2021Options,
     es2022::ES2022Options,
     es2026::ES2026Options,
-    jsx::{JsxOptions, ReactRefreshOptions},
+    jsx_stub::{JsxOptions, ReactRefreshOptions}, // Temporary stub
     plugins::{PluginsOptions, StyledComponentsOptions},
     proposals::ProposalOptions,
     regexp::RegExpOptions,
@@ -53,12 +53,12 @@ pub struct TransformOptions {
     pub typescript: TypeScriptOptions,
 
     /// Decorator
-    pub decorator: DecoratorOptions,
+    pub decorator: DecoratorOptions, // Temporary stub
 
     /// Jsx Transform
     ///
     /// See [preset-react](https://babeljs.io/docs/babel-preset-react)
-    pub jsx: JsxOptions,
+    pub jsx: JsxOptions, // Temporary stub
 
     /// ECMAScript Env Options
     pub env: EnvOptions,
@@ -86,12 +86,12 @@ impl TransformOptions {
             decorator: DecoratorOptions {
                 legacy: true,
                 emit_decorator_metadata: true,
-            },
+            }, // Temporary stub
             jsx: JsxOptions {
                 development: true,
                 refresh: Some(ReactRefreshOptions::default()),
                 ..JsxOptions::default()
-            },
+            }, // Temporary stub
             env: EnvOptions::enable_all(/* include_unfinished_plugins */ false),
             proposals: ProposalOptions::default(),
             plugins: PluginsOptions {

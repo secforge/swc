@@ -1,144 +1,448 @@
-//! This module is responsible for transforming `for await` to `for` statement
+//! This module is responsible for transforming `for await` to `for` statement.
 //!
-//! ## Implementation Status
-//!
-//! This is a stub implementation. The oxc version contains approximately 480
-//! lines of complex AST transformation code that:
-//!
-//! 1. Transforms `for await (let x of y)` statements into regular `for` loops
-//! 2. Wraps them in try-catch-finally blocks for proper async iteration cleanup
-//! 3. Manages scope creation and symbol binding
-//! 4. Uses statement injection to insert multiple statements
-//! 5. Handles labeled statements
-//! 6. Creates temporary variables for iterator state management
-//!
-//! The oxc implementation heavily uses:
-//! - Arena allocation (`ArenaVec`, `&'a` lifetimes)
-//! - `oxc_traverse::Traverse` and `TraverseCtx`
-//! - `oxc_semantic` for scope and symbol management
-//! - Complex helper function calls
-//! - Statement injection mechanisms
-//!
-//! Key functions that need porting:
-//! - `transform_statement`: Entry point for transforming for-await statements
-//! - `transform_for_of_statement`: Transforms the for-of into a complex for
-//!   loop
-//! - `build_for_await`: Builds the elaborate try-catch-finally structure
-//!
-//! To fully port this:
-//! 1. Rewrite using SWC's owned AST types (no arena allocation)
-//! 2. Use SWC's scope management (if available)
-//! 3. Implement VisitMutHook methods instead of Traverse methods
-//! 4. Handle helper function calls via SWC's helper injection
-//! 5. Manage statement insertion differently
-//! 6. Create temporary variables using SWC patterns
-//!
-//! For production use, consider using SWC's existing async iteration transform
-//! or the async-to-generator transform which may handle for-await loops.
+//! This implementation transforms `for await (let x of y)` statements into
+//! regular `for` loops wrapped in try-catch-finally blocks for proper async
+//! iteration cleanup.
 
+use std::mem;
+
+use swc_common::{SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
+use swc_ecma_utils::private_ident;
 
 use super::AsyncGeneratorFunctions;
-use crate::compat::context::TransformCtx;
+use crate::compat::common::helper_loader::Helper;
 
 impl<'ctx> AsyncGeneratorFunctions<'ctx> {
     /// Transform a for-await statement.
     ///
-    /// This method would check if a statement is a `for await` loop and
-    /// transform it into an equivalent `for` loop with proper async
-    /// iteration protocol.
-    ///
-    /// # Implementation Notes
-    ///
-    /// The oxc version:
-    /// 1. Checks if the parent allows multiple statements
-    /// 2. Creates appropriate scopes
-    /// 3. Calls `transform_for_of_statement` to do the heavy lifting
-    /// 4. Uses statement injection to insert generated code
-    /// 5. Wraps in a block statement if needed
-    ///
-    /// A full SWC port would need to:
-    /// - Detect `ForOfStmt` with `is_await: true`
-    /// - Generate the complex for loop structure
-    /// - Create try-catch-finally blocks
-    /// - Generate temporary variables for iterator management
-    /// - Handle statement replacement/insertion
-    ///
-    /// # Arguments
-    ///
-    /// * `stmt` - The statement to potentially transform
-    #[allow(dead_code)]
-    pub(crate) fn transform_statement(&self, _stmt: &mut Stmt) {
-        // TODO: Implement for-await transformation
-        //
-        // This would need to:
-        // 1. Match on stmt to find ForOfStmt
-        // 2. Check if it's an await for-of (for await)
-        // 3. If so, transform it using build_for_await logic
-        // 4. Generate:
-        //    - Iterator abort completion flag
-        //    - Error tracking variables
-        //    - Try-catch-finally structure
-        //    - Proper iterator.return() cleanup
-        //
-        // Example transformation:
-        // for await (let x of y) { ... }
-        // =>
-        // var _iteratorAbruptCompletion = false;
-        // var _didIteratorError = false;
-        // var _iteratorError;
-        // try {
-        //   for (
-        //     var _iterator = _asyncIterator(y), _step;
-        //     _iteratorAbruptCompletion = !(_step = await
-        // _iterator.next()).done;     _iteratorAbruptCompletion = false
-        //   ) {
-        //     let x = _step.value;
-        //     { ... }
-        //   }
-        // } catch (err) {
-        //   _didIteratorError = true;
-        //   _iteratorError = err;
-        // } finally {
-        //   try {
-        //     if (_iteratorAbruptCompletion && _iterator.return != null) {
-        //       await _iterator.return();
-        //     }
-        //   } finally {
-        //     if (_didIteratorError) {
-        //       throw _iteratorError;
-        //     }
-        //   }
-        // }
+    /// This method checks if a statement is a `for await` loop and transforms
+    /// it into an equivalent `for` loop with proper async iteration protocol.
+    pub(crate) fn transform_statement(&mut self, stmt: &mut Stmt) {
+        let for_of = match stmt {
+            Stmt::ForOf(for_of) if for_of.is_await => for_of,
+            _ => return,
+        };
+
+        // Generate unique identifiers for iterator state management
+        let step_ident = private_ident!("_step");
+        let iterator_ident = private_ident!("_iterator");
+        let iterator_abrupt_completion = private_ident!("_iteratorAbruptCompletion");
+        let iterator_had_error = private_ident!("_didIteratorError");
+        let iterator_error = private_ident!("_iteratorError");
+
+        // Extract the loop body
+        let mut body_stmts = match mem::take(&mut *for_of.body) {
+            Stmt::Block(block) => block.stmts,
+            other => vec![other],
+        };
+
+        // Create assignment statement: let x = _step.value
+        let assignment_stmt = match &for_of.left {
+            ForHead::VarDecl(var_decl) => {
+                let decl = &var_decl.decls[0];
+                let mut new_decl = decl.clone();
+                new_decl.init = Some(Box::new(Expr::Member(MemberExpr {
+                    span: DUMMY_SP,
+                    obj: Box::new(Expr::Ident(step_ident.clone())),
+                    prop: MemberProp::Ident(IdentName::new("value".into(), DUMMY_SP)),
+                })));
+                Stmt::Decl(Decl::Var(Box::new(VarDecl {
+                    span: DUMMY_SP,
+                    ctxt: SyntaxContext::empty(),
+                    kind: var_decl.kind,
+                    declare: false,
+                    decls: vec![new_decl],
+                })))
+            }
+            ForHead::Pat(pat) => {
+                let target = match &**pat {
+                    Pat::Ident(ident) => AssignTarget::Simple(SimpleAssignTarget::Ident(
+                        BindingIdent::from(ident.id.clone()),
+                    )),
+                    Pat::Array(arr) => AssignTarget::Pat(AssignTargetPat::Array(ArrayPat {
+                        span: arr.span,
+                        elems: arr.elems.clone(),
+                        optional: false,
+                        type_ann: None,
+                    })),
+                    Pat::Object(obj) => AssignTarget::Pat(AssignTargetPat::Object(ObjectPat {
+                        span: obj.span,
+                        props: obj.props.clone(),
+                        optional: false,
+                        type_ann: None,
+                    })),
+                    _ => return, // Invalid pattern
+                };
+
+                Stmt::Expr(ExprStmt {
+                    span: DUMMY_SP,
+                    expr: Box::new(Expr::Assign(AssignExpr {
+                        span: DUMMY_SP,
+                        op: op!("="),
+                        left: target,
+                        right: Box::new(Expr::Member(MemberExpr {
+                            span: DUMMY_SP,
+                            obj: Box::new(Expr::Ident(step_ident.clone())),
+                            prop: MemberProp::Ident(IdentName::new("value".into(), DUMMY_SP)),
+                        })),
+                    })),
+                })
+            }
+            _ => return,
+        };
+
+        // Prepend assignment to body
+        body_stmts.insert(0, assignment_stmt);
+
+        // Create the iterator expression: babelHelpers.asyncIterator(y)
+        let iterator_init = Expr::Call(CallExpr {
+            span: DUMMY_SP,
+            ctxt: SyntaxContext::empty(),
+            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                span: DUMMY_SP,
+                obj: Box::new(Expr::Ident(Ident::new(
+                    "babelHelpers".into(),
+                    DUMMY_SP,
+                    Default::default(),
+                ))),
+                prop: MemberProp::Ident(IdentName::new(
+                    Helper::AsyncIterator.name().into(),
+                    DUMMY_SP,
+                )),
+            }))),
+            args: vec![ExprOrSpread {
+                spread: None,
+                expr: Box::new(mem::take(&mut *for_of.right)),
+            }],
+            type_args: None,
+        });
+
+        let statements = Self::build_for_await(
+            iterator_init,
+            step_ident,
+            iterator_ident,
+            iterator_abrupt_completion,
+            iterator_had_error,
+            iterator_error,
+            body_stmts,
+        );
+
+        // Replace the for-await statement with a block containing all the generated
+        // statements
+        *stmt = Stmt::Block(BlockStmt {
+            span: DUMMY_SP,
+            ctxt: SyntaxContext::empty(),
+            stmts: statements,
+        });
     }
 
-    /// Build a `for` statement used to replace the `for await` statement.
+    /// Build the complete for-await structure with try-catch-finally.
     ///
-    /// This function would build the complex structure shown in the comments
-    /// above.
-    ///
-    /// Based on Babel's implementation:
-    /// <https://github.com/babel/babel/blob/d20b314c14533ab86351ecf6ca6b7296b66a57b3/packages/babel-plugin-transform-async-generator-functions/src/for-await.ts#L3-L30>
-    #[allow(dead_code)]
+    /// This generates code like:
+    /// ```js
+    /// var _iteratorAbruptCompletion = false;
+    /// var _didIteratorError = false;
+    /// var _iteratorError;
+    /// try {
+    ///   for (
+    ///     var _iterator = asyncIterator(obj), _step;
+    ///     _iteratorAbruptCompletion = !(_step = await _iterator.next()).done;
+    ///     _iteratorAbruptCompletion = false
+    ///   ) {
+    ///     // body
+    ///   }
+    /// } catch (err) {
+    ///   _didIteratorError = true;
+    ///   _iteratorError = err;
+    /// } finally {
+    ///   try {
+    ///     if (_iteratorAbruptCompletion && _iterator.return != null) {
+    ///       await _iterator.return();
+    ///     }
+    ///   } finally {
+    ///     if (_didIteratorError) {
+    ///       throw _iteratorError;
+    ///     }
+    ///   }
+    /// }
+    /// ```
+    #[allow(clippy::too_many_arguments)]
     fn build_for_await(
-        _iterator: Box<Expr>,
-        _step_key: &str,
-        _body: Vec<Stmt>,
-        _ctx: &TransformCtx,
+        iterator_init: Expr,
+        step_ident: Ident,
+        iterator_ident: Ident,
+        iterator_abrupt_completion: Ident,
+        iterator_had_error: Ident,
+        iterator_error: Ident,
+        body: Vec<Stmt>,
     ) -> Vec<Stmt> {
-        // TODO: Implement the complex for-await structure
-        //
-        // This needs to create:
-        // 1. Variable declarations for state tracking
-        // 2. A for loop with:
-        //    - Init: iterator assignment and step variable
-        //    - Test: assignment to step from await iterator.next(), checking !done
-        //    - Update: reset abort completion flag
-        //    - Body: original loop body with proper variable assignment
-        // 3. Catch clause to track errors
-        // 4. Finally clause with nested try-finally for cleanup
-        //
-        // All using SWC's AST types (Stmt, Expr, VarDecl, etc.)
-        vec![]
+        let mut statements = vec![];
+
+        // var _iteratorAbruptCompletion = false;
+        statements.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
+            span: DUMMY_SP,
+            ctxt: SyntaxContext::empty(),
+            kind: VarDeclKind::Var,
+            declare: false,
+            decls: vec![VarDeclarator {
+                span: DUMMY_SP,
+                name: Pat::Ident(BindingIdent::from(iterator_abrupt_completion.clone())),
+                init: Some(Box::new(Expr::Lit(Lit::Bool(Bool {
+                    span: DUMMY_SP,
+                    value: false,
+                })))),
+                definite: false,
+            }],
+        }))));
+
+        // var _didIteratorError = false;
+        statements.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
+            span: DUMMY_SP,
+            ctxt: SyntaxContext::empty(),
+            kind: VarDeclKind::Var,
+            declare: false,
+            decls: vec![VarDeclarator {
+                span: DUMMY_SP,
+                name: Pat::Ident(BindingIdent::from(iterator_had_error.clone())),
+                init: Some(Box::new(Expr::Lit(Lit::Bool(Bool {
+                    span: DUMMY_SP,
+                    value: false,
+                })))),
+                definite: false,
+            }],
+        }))));
+
+        // var _iteratorError;
+        statements.push(Stmt::Decl(Decl::Var(Box::new(VarDecl {
+            span: DUMMY_SP,
+            ctxt: SyntaxContext::empty(),
+            kind: VarDeclKind::Var,
+            declare: false,
+            decls: vec![VarDeclarator {
+                span: DUMMY_SP,
+                name: Pat::Ident(BindingIdent::from(iterator_error.clone())),
+                init: None,
+                definite: false,
+            }],
+        }))));
+
+        // Build the for loop
+        let for_stmt = Stmt::For(ForStmt {
+            span: DUMMY_SP,
+            // var _iterator = asyncIterator(obj), _step;
+            init: Some(VarDeclOrExpr::VarDecl(Box::new(VarDecl {
+                span: DUMMY_SP,
+                ctxt: SyntaxContext::empty(),
+                kind: VarDeclKind::Var,
+                declare: false,
+                decls: vec![
+                    VarDeclarator {
+                        span: DUMMY_SP,
+                        name: Pat::Ident(BindingIdent::from(iterator_ident.clone())),
+                        init: Some(Box::new(iterator_init)),
+                        definite: false,
+                    },
+                    VarDeclarator {
+                        span: DUMMY_SP,
+                        name: Pat::Ident(BindingIdent::from(step_ident.clone())),
+                        init: None,
+                        definite: false,
+                    },
+                ],
+            }))),
+            // _iteratorAbruptCompletion = !(_step = await _iterator.next()).done
+            test: Some(Box::new(Expr::Assign(AssignExpr {
+                span: DUMMY_SP,
+                op: op!("="),
+                left: AssignTarget::Simple(SimpleAssignTarget::Ident(BindingIdent::from(
+                    iterator_abrupt_completion.clone(),
+                ))),
+                right: Box::new(Expr::Unary(UnaryExpr {
+                    span: DUMMY_SP,
+                    op: op!("!"),
+                    arg: Box::new(Expr::Member(MemberExpr {
+                        span: DUMMY_SP,
+                        obj: Box::new(Expr::Paren(ParenExpr {
+                            span: DUMMY_SP,
+                            expr: Box::new(Expr::Assign(AssignExpr {
+                                span: DUMMY_SP,
+                                op: op!("="),
+                                left: AssignTarget::Simple(SimpleAssignTarget::Ident(
+                                    BindingIdent::from(step_ident.clone()),
+                                )),
+                                right: Box::new(Expr::Await(AwaitExpr {
+                                    span: DUMMY_SP,
+                                    arg: Box::new(Expr::Call(CallExpr {
+                                        span: DUMMY_SP,
+                                        ctxt: SyntaxContext::empty(),
+                                        callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                                            span: DUMMY_SP,
+                                            obj: Box::new(Expr::Ident(iterator_ident.clone())),
+                                            prop: MemberProp::Ident(IdentName::new(
+                                                "next".into(),
+                                                DUMMY_SP,
+                                            )),
+                                        }))),
+                                        args: vec![],
+                                        type_args: None,
+                                    })),
+                                })),
+                            })),
+                        })),
+                        prop: MemberProp::Ident(IdentName::new("done".into(), DUMMY_SP)),
+                    })),
+                })),
+            }))),
+            // _iteratorAbruptCompletion = false
+            update: Some(Box::new(Expr::Assign(AssignExpr {
+                span: DUMMY_SP,
+                op: op!("="),
+                left: AssignTarget::Simple(SimpleAssignTarget::Ident(BindingIdent::from(
+                    iterator_abrupt_completion.clone(),
+                ))),
+                right: Box::new(Expr::Lit(Lit::Bool(Bool {
+                    span: DUMMY_SP,
+                    value: false,
+                }))),
+            }))),
+            body: Box::new(Stmt::Block(BlockStmt {
+                span: DUMMY_SP,
+                ctxt: SyntaxContext::empty(),
+                stmts: body,
+            })),
+        });
+
+        // Build catch clause
+        let err_ident = private_ident!("err");
+        let catch_clause = CatchClause {
+            span: DUMMY_SP,
+            param: Some(Pat::Ident(BindingIdent::from(err_ident.clone()))),
+            body: BlockStmt {
+                span: DUMMY_SP,
+                ctxt: SyntaxContext::empty(),
+                stmts: vec![
+                    // _didIteratorError = true;
+                    Stmt::Expr(ExprStmt {
+                        span: DUMMY_SP,
+                        expr: Box::new(Expr::Assign(AssignExpr {
+                            span: DUMMY_SP,
+                            op: op!("="),
+                            left: AssignTarget::Simple(SimpleAssignTarget::Ident(
+                                BindingIdent::from(iterator_had_error.clone()),
+                            )),
+                            right: Box::new(Expr::Lit(Lit::Bool(Bool {
+                                span: DUMMY_SP,
+                                value: true,
+                            }))),
+                        })),
+                    }),
+                    // _iteratorError = err;
+                    Stmt::Expr(ExprStmt {
+                        span: DUMMY_SP,
+                        expr: Box::new(Expr::Assign(AssignExpr {
+                            span: DUMMY_SP,
+                            op: op!("="),
+                            left: AssignTarget::Simple(SimpleAssignTarget::Ident(
+                                BindingIdent::from(iterator_error.clone()),
+                            )),
+                            right: Box::new(Expr::Ident(err_ident)),
+                        })),
+                    }),
+                ],
+            },
+        };
+
+        // Build finally clause with nested try-finally
+        let finally_block = BlockStmt {
+            span: DUMMY_SP,
+            ctxt: SyntaxContext::empty(),
+            stmts: vec![Stmt::Try(Box::new(TryStmt {
+                span: DUMMY_SP,
+                block: BlockStmt {
+                    span: DUMMY_SP,
+                    ctxt: SyntaxContext::empty(),
+                    stmts: vec![Stmt::If(IfStmt {
+                        span: DUMMY_SP,
+                        test: Box::new(Expr::Bin(BinExpr {
+                            span: DUMMY_SP,
+                            op: op!("&&"),
+                            left: Box::new(Expr::Ident(iterator_abrupt_completion.clone())),
+                            right: Box::new(Expr::Bin(BinExpr {
+                                span: DUMMY_SP,
+                                op: op!("!="),
+                                left: Box::new(Expr::Member(MemberExpr {
+                                    span: DUMMY_SP,
+                                    obj: Box::new(Expr::Ident(iterator_ident.clone())),
+                                    prop: MemberProp::Ident(IdentName::new(
+                                        "return".into(),
+                                        DUMMY_SP,
+                                    )),
+                                })),
+                                right: Box::new(Expr::Lit(Lit::Null(Null { span: DUMMY_SP }))),
+                            })),
+                        })),
+                        cons: Box::new(Stmt::Block(BlockStmt {
+                            span: DUMMY_SP,
+                            ctxt: SyntaxContext::empty(),
+                            stmts: vec![Stmt::Expr(ExprStmt {
+                                span: DUMMY_SP,
+                                expr: Box::new(Expr::Await(AwaitExpr {
+                                    span: DUMMY_SP,
+                                    arg: Box::new(Expr::Call(CallExpr {
+                                        span: DUMMY_SP,
+                                        ctxt: SyntaxContext::empty(),
+                                        callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                                            span: DUMMY_SP,
+                                            obj: Box::new(Expr::Ident(iterator_ident)),
+                                            prop: MemberProp::Ident(IdentName::new(
+                                                "return".into(),
+                                                DUMMY_SP,
+                                            )),
+                                        }))),
+                                        args: vec![],
+                                        type_args: None,
+                                    })),
+                                })),
+                            })],
+                        })),
+                        alt: None,
+                    })],
+                },
+                handler: None,
+                finalizer: Some(BlockStmt {
+                    span: DUMMY_SP,
+                    ctxt: SyntaxContext::empty(),
+                    stmts: vec![Stmt::If(IfStmt {
+                        span: DUMMY_SP,
+                        test: Box::new(Expr::Ident(iterator_had_error)),
+                        cons: Box::new(Stmt::Block(BlockStmt {
+                            span: DUMMY_SP,
+                            ctxt: SyntaxContext::empty(),
+                            stmts: vec![Stmt::Throw(ThrowStmt {
+                                span: DUMMY_SP,
+                                arg: Box::new(Expr::Ident(iterator_error)),
+                            })],
+                        })),
+                        alt: None,
+                    })],
+                }),
+            }))],
+        };
+
+        // Build the complete try-catch-finally statement
+        let try_stmt = Stmt::Try(Box::new(TryStmt {
+            span: DUMMY_SP,
+            block: BlockStmt {
+                span: DUMMY_SP,
+                ctxt: SyntaxContext::empty(),
+                stmts: vec![for_stmt],
+            },
+            handler: Some(catch_clause),
+            finalizer: Some(finally_block),
+        }));
+
+        statements.push(try_stmt);
+        statements
     }
 }

@@ -34,6 +34,7 @@
 //! * Babel plugin implementation: <https://github.com/babel/babel/blob/v7.26.9/packages/babel-plugin-transform-explicit-resource-management>
 //! * Explicit Resource Management TC39 proposal: <https://github.com/tc39/proposal-explicit-resource-management>
 
+#![allow(dead_code)]
 use std::{cell::RefCell, mem};
 
 use rustc_hash::FxHashMap;

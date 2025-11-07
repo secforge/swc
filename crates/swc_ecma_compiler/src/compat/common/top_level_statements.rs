@@ -11,6 +11,8 @@
 //! The OXC version uses `TransformCtx` and the `Traverse` pattern.
 //! This SWC version adapts the functionality to work with SWC's architecture.
 
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 
 use swc_ecma_ast::*;

@@ -91,16 +91,16 @@
 use super::{jsx_self::JsxSelf, jsx_source::JsxSource, options::JsxOptions};
 use crate::compat::context::TransformCtx;
 
-pub struct JsxImpl {
+pub struct JsxImpl<'ctx> {
     // pure: bool,
     // options: JsxOptions,
     // ctx: &'ctx TransformCtx<'a>,
-    pub jsx_self: JsxSelf,
-    pub jsx_source: JsxSource,
+    pub jsx_self: JsxSelf<'ctx>,
+    pub jsx_source: JsxSource<'ctx>,
 }
 
-impl JsxImpl {
-    pub fn new(_options: JsxOptions, ctx: &TransformCtx) -> Self {
+impl<'ctx> JsxImpl<'ctx> {
+    pub fn new(_options: JsxOptions, ctx: &'ctx TransformCtx) -> Self {
         Self {
             jsx_self: JsxSelf::new(ctx),
             jsx_source: JsxSource::new(ctx),

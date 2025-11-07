@@ -43,10 +43,13 @@
 //! For production use, consider using SWC's existing object rest/spread
 //! transform at `swc_ecma_transforms_compat::es2018::object_rest_spread`.
 
+#![allow(dead_code)]
 use serde::Deserialize;
+use swc_common::{SyntaxContext, DUMMY_SP};
+use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;
 
-use crate::compat::context::TransformCtx;
+use crate::compat::{common::helper_loader::Helper, context::TransformCtx};
 
 /// Options for object rest/spread transformation
 #[derive(Debug, Default, Clone, Copy, Deserialize)]
@@ -65,30 +68,17 @@ pub struct ObjectRestSpreadOptions {
 ///
 /// # Implementation Status
 ///
-/// This is a stub implementation. The full transformation logic from oxc's
-/// object_rest_spread.rs is extremely complex (over 1100 lines) and involves:
+/// This implementation currently handles:
+/// - Basic object spread in object literals: `{ ...obj, key: value }`
 ///
-/// - Walking and transforming nested patterns
-/// - Creating temporary references for complex expressions
-/// - Managing excluded keys for rest patterns
-/// - Handling multiple contexts (assignments, declarations, function params,
-///   etc.)
-/// - Scope and symbol management
+/// Not yet implemented (simplified from oxc):
+/// - Object rest in destructuring patterns
+/// - Complex nested patterns
+/// - Function parameter rest/spread
+/// - Assignment expression rest/spread
+/// - Variable declaration rest patterns
 ///
-/// The oxc implementation uses:
-/// - Arena allocation (`&'a` lifetimes, `ArenaVec`, `ArenaBox`)
-/// - `oxc_traverse::Traverse` trait with `TraverseCtx`
-/// - `oxc_semantic` for scopes and symbols
-/// - Complex AST node manipulation with `TakeIn` pattern
-///
-/// To fully port this, one would need to:
-/// 1. Rewrite using SWC's owned AST types
-/// 2. Use SWC's scope/symbol management APIs
-/// 3. Implement custom VisitMutHook methods for each node type
-/// 4. Handle statement injection using SWC patterns
-/// 5. Manage temporary variables without arena allocation
-///
-/// For now, this serves as a placeholder. Users should rely on SWC's built-in
+/// For production use with full feature support, consider using SWC's built-in
 /// object rest/spread transform in `swc_ecma_transforms_compat`.
 pub struct ObjectRestSpread<'ctx> {
     #[allow(dead_code)]
@@ -115,37 +105,124 @@ impl<'ctx> ObjectRestSpread<'ctx> {
         }
         Self { options, ctx }
     }
+
+    /// Transform object expressions containing spread properties.
+    ///
+    /// Transforms `{ ...x, a: 1 }` to `objectSpread2({}, x, { a: 1 })`.
+    fn transform_object_expression(&self, obj: &mut ObjectLit) -> Option<Expr> {
+        // Check if there are any spread properties
+        if !obj
+            .props
+            .iter()
+            .any(|prop| matches!(prop, PropOrSpread::Spread(_)))
+        {
+            return None;
+        }
+
+        let mut arguments = vec![];
+        let mut current_props = vec![];
+
+        for prop in obj.props.drain(..) {
+            match prop {
+                PropOrSpread::Spread(spread) => {
+                    // Flush current props as an object literal
+                    if !current_props.is_empty() {
+                        arguments.push(ExprOrSpread {
+                            spread: None,
+                            expr: Box::new(Expr::Object(ObjectLit {
+                                span: DUMMY_SP,
+                                props: std::mem::take(&mut current_props),
+                            })),
+                        });
+                    }
+                    // Add the spread expression
+                    arguments.push(ExprOrSpread {
+                        spread: None,
+                        expr: spread.expr,
+                    });
+                }
+                prop => {
+                    current_props.push(prop);
+                }
+            }
+        }
+
+        // Flush remaining props
+        if !current_props.is_empty() {
+            arguments.push(ExprOrSpread {
+                spread: None,
+                expr: Box::new(Expr::Object(ObjectLit {
+                    span: DUMMY_SP,
+                    props: current_props,
+                })),
+            });
+        }
+
+        // If first argument is not an empty object, prepend one
+        let first_is_empty_object = arguments.first().is_some_and(|arg| {
+            matches!(
+                &*arg.expr,
+                Expr::Object(ObjectLit { props, .. }) if props.is_empty()
+            )
+        });
+
+        if !first_is_empty_object {
+            arguments.insert(
+                0,
+                ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Object(ObjectLit {
+                        span: DUMMY_SP,
+                        props: vec![],
+                    })),
+                },
+            );
+        }
+
+        // Create helper call: babelHelpers.objectSpread2({}, x, { a: 1 })
+        Some(Expr::Call(CallExpr {
+            span: DUMMY_SP,
+            ctxt: SyntaxContext::empty(),
+            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                span: DUMMY_SP,
+                obj: Box::new(Expr::Ident(Ident::new(
+                    "babelHelpers".into(),
+                    DUMMY_SP,
+                    Default::default(),
+                ))),
+                prop: MemberProp::Ident(IdentName::new(
+                    Helper::ObjectSpread2.name().into(),
+                    DUMMY_SP,
+                )),
+            }))),
+            args: arguments,
+            type_args: None,
+        }))
+    }
 }
 
 impl VisitMutHook for ObjectRestSpread<'_> {
-    // TODO: Implement object rest/spread transformation using SWC's VisitMutHook
-    // pattern.
+    fn exit_expr(&mut self, expr: &mut Expr) {
+        if let Expr::Object(obj) = expr {
+            if let Some(new_expr) = self.transform_object_expression(obj) {
+                *expr = new_expr;
+            }
+        }
+    }
+
+    // TODO: Implement additional transformations:
     //
-    // Key methods from oxc that need to be ported:
+    // - exit_pat: Transform patterns with rest in destructuring
+    // - exit_param: Transform function parameters with rest
+    // - exit_stmt: Handle variable declarations with rest patterns
     //
-    // - exit_program: Handle excluded variable declarators
-    // - enter_expression: Transform object expressions and assignment expressions
-    // - enter_arrow_function_expression: Transform arrow function params
-    // - enter_function: Transform function params
-    // - enter_variable_declaration: Transform variable declarations with rest
-    // - enter_catch_clause: Transform catch clause params
-    // - enter_for_in_statement: Transform for-in statement left side
-    // - enter_for_of_statement: Transform for-of statement left side
+    // These would require:
+    // 1. Detecting rest patterns in various contexts
+    // 2. Creating temporary variables as needed
+    // 3. Generating helper calls for objectWithoutProperties
+    // 4. Managing excluded keys for rest patterns
     //
-    // Each of these needs to:
-    // 1. Detect if transformation is needed (has rest/spread)
-    // 2. Create temporary variables as needed
-    // 3. Transform the node structure
-    // 4. Inject additional statements if needed
-    //
-    // The oxc implementation has many helper methods that also need porting:
-    // - transform_object_expression
-    // - transform_assignment_expression
-    // - transform_variable_declarator
-    // - walk_assignment_target
-    // - recursive_walk_binding_pattern
-    // - transform_property_key
-    // - has_nested_object_rest
-    // - replace_rest_element
-    // And many more...
+    // The full oxc implementation is over 1100 lines handling all these cases.
+    // For now, this simplified version handles the most common use case:
+    // object spread in object literals.
 }

@@ -31,6 +31,7 @@
 //! * Exponentiation operator TC39 proposal: <https://github.com/tc39/proposal-exponentiation-operator>
 //! * Exponentiation operator specification: <https://tc39.es/ecma262/#sec-exp-operator>
 
+#![allow(dead_code)]
 use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;

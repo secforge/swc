@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 /// Diagnostic message for import equals used in ESM context
 pub fn import_equals_cannot_be_used_in_esm() -> String {
     "Import assignment cannot be used when targeting ECMAScript modules. Consider using 'import * \

@@ -2,8 +2,12 @@ use serde::Deserialize;
 
 use super::PluginPresetEntries;
 use crate::compat::{
-    decorator::DecoratorOptions, es2015::ArrowFunctionsOptions, es2018::ObjectRestSpreadOptions,
-    es2022::ClassPropertiesOptions, jsx::JsxOptions, plugins::StyledComponentsOptions,
+    decorator_stub::DecoratorOptions, // Temporary stub
+    es2015::ArrowFunctionsOptions,
+    es2018::ObjectRestSpreadOptions,
+    es2022::ClassPropertiesOptions,
+    jsx_stub::JsxOptions, // Temporary stub
+    plugins::StyledComponentsOptions,
     typescript::TypeScriptOptions,
 };
 

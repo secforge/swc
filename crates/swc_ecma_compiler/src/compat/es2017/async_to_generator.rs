@@ -51,6 +51,7 @@
 //! * Babel implementation: <https://github.com/babel/babel/blob/v7.26.2/packages/babel-plugin-transform-async-to-generator>
 //! * Async / Await TC39 proposal: <https://github.com/tc39/proposal-async-await>
 
+#![allow(dead_code)]
 use std::mem;
 
 use swc_common::{SyntaxContext, DUMMY_SP};
@@ -646,9 +647,8 @@ impl<'ctx> AsyncGeneratorExecutor<'ctx> {
     /// `function* (_x, _x1, _x2) {}`
     fn create_placeholder_params(params: &[Param]) -> Vec<Param> {
         let mut parameters = Vec::with_capacity(params.len());
-        let mut counter = 0;
 
-        for param in params {
+        for (counter, param) in params.iter().enumerate() {
             if matches!(param.pat, Pat::Assign(_)) {
                 break;
             }
@@ -667,7 +667,6 @@ impl<'ctx> AsyncGeneratorExecutor<'ctx> {
                     type_ann: None,
                 }),
             });
-            counter += 1;
         }
 
         parameters

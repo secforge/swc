@@ -8,27 +8,62 @@
 //! types. The main differences from the oxc implementation:
 //!
 //! - Uses `swc_ecma_ast` types instead of `oxc_ast`
-//! - Uses `swc_ecma_visit::VisitMut` instead of `oxc_traverse::Traverse`
-//! - Uses owned types instead of arena allocation with lifetimes
+//! - Uses `swc_ecma_hooks::VisitMutHook` instead of `oxc_traverse::Traverse`
+//! - Uses owned types (Box/Vec) instead of arena allocation with lifetimes
 //!
-//! ## Porting Notes
+//! ## Architecture
 //!
-//! The original oxc implementation consists of:
-//! - `mod.rs` (~3.9KB): Main Decorator struct with Traverse impl
-//! - `options.rs` (~976 bytes): DecoratorOptions configuration
-//! - `legacy/mod.rs` (~46KB): LegacyDecorator implementation
-//! - `legacy/metadata.rs` (~30KB): Metadata emission for decorators
+//! The decorator module is organized into:
+//! - `options.rs` - Configuration for decorator transformation
+//! - `legacy/` - Legacy (experimental) decorator implementation
+//!   - `mod.rs` - Main transformation logic
+//!   - `metadata.rs` - TypeScript metadata emission support
 //!
-//! Key challenges in porting:
-//! 1. SWC's AST types have different structure and naming conventions
-//! 2. SWC uses VisitMut trait which mutates in-place, vs oxc's Traverse with
-//!    arena allocation
-//! 3. Helper infrastructure (var_declarations, module_imports,
-//!    statement_injector) needs to be adapted
-//! 4. Symbol/scope management differs between oxc_semantic and swc's symbol
-//!    resolution
+//! ## Key Features
 //!
-//! TODO: Complete the porting of the decorator transformation logic
+//! ### Legacy Decorators
+//!
+//! Transforms legacy (experimental) decorators to `_decorate` and
+//! `_decorateParam` helper calls. This includes:
+//! - Class decorators
+//! - Method decorators (including getters/setters)
+//! - Property decorators
+//! - Parameter decorators
+//! - TypeScript decorator metadata emission (`emitDecoratorMetadata`)
+//!
+//! ### TypeScript Metadata
+//!
+//! When `emit_decorator_metadata` is enabled, the transformer emits design-time
+//! type information for:
+//! - `design:type` - The type of a property or method
+//! - `design:paramtypes` - Parameter types of a method
+//! - `design:returntype` - Return type of a method
+//!
+//! ## Usage
+//!
+//! ```ignore
+//! use swc_ecma_compiler::compat::{Decorator, DecoratorOptions, TransformCtx};
+//!
+//! let options = DecoratorOptions {
+//!     legacy: true,
+//!     emit_decorator_metadata: true,
+//! };
+//!
+//! let ctx = TransformCtx::new(&transform_options);
+//! let mut decorator = Decorator::new(options, &ctx);
+//!
+//! // Use as a VisitMutHook
+//! ```
+//!
+//! ## Limitations
+//!
+//! Compared to TypeScript's decorator metadata emission:
+//! - We cannot infer the exact type of type aliases (e.g., `type Foo = string`)
+//! - Type references generate runtime checks instead of compile-time resolution
+//!
+//! These limitations are shared with other transpilers like SWC and are
+//! generally acceptable for frameworks like NestJS that rely on decorator
+//! metadata.
 
 mod legacy;
 mod options;
@@ -36,7 +71,7 @@ mod options;
 use legacy::LegacyDecorator;
 pub use options::DecoratorOptions;
 use swc_ecma_ast::*;
-use swc_ecma_visit::{VisitMut, VisitMutWith};
+use swc_ecma_hooks::VisitMutHook;
 
 use crate::compat::TransformCtx;
 
@@ -45,40 +80,88 @@ use crate::compat::TransformCtx;
 /// This struct manages decorator transformations, delegating to the appropriate
 /// implementation based on options (currently only legacy decorators are
 /// supported).
-pub struct Decorator {
+pub struct Decorator<'ctx> {
     options: DecoratorOptions,
-    legacy_decorator: LegacyDecorator,
+    legacy_decorator: LegacyDecorator<'ctx>,
 }
 
-impl Decorator {
+impl<'ctx> Decorator<'ctx> {
     /// Create a new Decorator transformer with the given options
-    pub fn new(options: DecoratorOptions, _ctx: &TransformCtx) -> Self {
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Decorator transformation options
+    /// * `ctx` - Transform context providing shared state and utilities
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let options = DecoratorOptions {
+    ///     legacy: true,
+    ///     emit_decorator_metadata: true,
+    /// };
+    /// let decorator = Decorator::new(options, &ctx);
+    /// ```
+    pub fn new(options: DecoratorOptions, ctx: &'ctx TransformCtx) -> Self {
         Self {
-            legacy_decorator: LegacyDecorator::new(options.emit_decorator_metadata),
+            legacy_decorator: LegacyDecorator::new(options.emit_decorator_metadata, ctx),
             options,
         }
     }
 }
 
-impl VisitMut for Decorator {
-    fn visit_mut_module(&mut self, n: &mut Module) {
+impl VisitMutHook for Decorator<'_> {
+    fn enter_stmt(&mut self, stmt: &mut Stmt) {
         if self.options.legacy {
-            self.legacy_decorator.visit_mut_module(n);
+            self.legacy_decorator.enter_stmt(stmt);
         }
-        n.visit_mut_children_with(self);
     }
 
-    fn visit_mut_script(&mut self, n: &mut Script) {
+    fn enter_class(&mut self, class: &mut Class) {
         if self.options.legacy {
-            self.legacy_decorator.visit_mut_script(n);
+            self.legacy_decorator.enter_class(class);
         }
-        n.visit_mut_children_with(self);
     }
 
-    fn visit_mut_class(&mut self, n: &mut Class) {
+    fn exit_class(&mut self, class: &mut Class) {
         if self.options.legacy {
-            self.legacy_decorator.visit_mut_class(n);
+            self.legacy_decorator.exit_class(class);
         }
-        n.visit_mut_children_with(self);
+    }
+
+    fn enter_class_method(&mut self, method: &mut ClassMethod) {
+        if self.options.legacy {
+            self.legacy_decorator.enter_class_method(method);
+        }
+    }
+
+    fn exit_class_method(&mut self, method: &mut ClassMethod) {
+        if self.options.legacy {
+            self.legacy_decorator.exit_class_method(method);
+        }
+    }
+
+    fn enter_class_prop(&mut self, prop: &mut ClassProp) {
+        if self.options.legacy {
+            self.legacy_decorator.enter_class_prop(prop);
+        }
+    }
+
+    fn exit_class_prop(&mut self, prop: &mut ClassProp) {
+        if self.options.legacy {
+            self.legacy_decorator.exit_class_prop(prop);
+        }
+    }
+
+    fn enter_private_prop(&mut self, prop: &mut PrivateProp) {
+        if self.options.legacy {
+            self.legacy_decorator.enter_private_prop(prop);
+        }
+    }
+
+    fn exit_private_prop(&mut self, prop: &mut PrivateProp) {
+        if self.options.legacy {
+            self.legacy_decorator.exit_private_prop(prop);
+        }
     }
 }

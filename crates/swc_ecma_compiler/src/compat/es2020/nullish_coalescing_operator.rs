@@ -29,6 +29,7 @@
 //! * Babel plugin implementation: <https://github.com/babel/babel/tree/v7.26.2/packages/babel-plugin-transform-nullish-coalescing-operator>
 //! * Nullish coalescing TC39 proposal: <https://github.com/tc39-transfer/proposal-nullish-coalescing>
 
+#![allow(dead_code)]
 use std::mem;
 
 use swc_atoms::Atom;
@@ -78,7 +79,7 @@ impl<'ctx> NullishCoalescingOperator<'ctx> {
     }
 
     /// Transform a logical expression with nullish coalescing operator.
-    fn transform_logical_expression(&mut self, left: Box<Expr>, right: Box<Expr>) -> Expr {
+    fn transform_logical_expression(&mut self, left: Box<Expr>, right: Expr) -> Expr {
         // Check if left is a simple identifier or this expression
         match left.as_ref() {
             Expr::This(_) => {
@@ -87,7 +88,7 @@ impl<'ctx> NullishCoalescingOperator<'ctx> {
                     *left.clone(),
                     *left.clone(),
                     *left,
-                    *right,
+                    right,
                 );
             }
             Expr::Ident(ident) => {
@@ -98,7 +99,7 @@ impl<'ctx> NullishCoalescingOperator<'ctx> {
                     ident_expr.clone(),
                     ident_expr.clone(),
                     ident_expr,
-                    *right,
+                    right,
                 );
             }
             _ => {}
@@ -120,7 +121,7 @@ impl<'ctx> NullishCoalescingOperator<'ctx> {
         let reference1 = Expr::Ident(binding.id.clone());
         let reference2 = Expr::Ident(binding.id.clone());
 
-        self.create_conditional_expression(assignment, reference1, reference2, *right)
+        self.create_conditional_expression(assignment, reference1, reference2, right)
     }
 
     /// Create a conditional expression for nullish coalescing.
@@ -200,7 +201,7 @@ impl VisitMutHook for NullishCoalescingOperator<'_> {
             // Transform the expression
             let left = mem::take(left);
             let right = mem::take(right);
-            *expr = self.transform_logical_expression(left, right);
+            *expr = self.transform_logical_expression(left, *right);
         }
     }
 
@@ -212,12 +213,10 @@ impl VisitMutHook for NullishCoalescingOperator<'_> {
     fn exit_module(&mut self, module: &mut Module) {
         // Insert variable declarations at the top of the module
         for item in &mut module.body {
-            if let ModuleItem::Stmt(stmt) = item {
-                if let Stmt::Block(block) = stmt {
-                    self.var_declarations
-                        .insert_into_statements(&mut block.stmts);
-                    break;
-                }
+            if let ModuleItem::Stmt(Stmt::Block(block)) = item {
+                self.var_declarations
+                    .insert_into_statements(&mut block.stmts);
+                break;
             }
         }
     }

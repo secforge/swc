@@ -21,6 +21,8 @@
 //! self.var_declarations.insert_let(&binding_ident2, Some(init_expr));
 //! ```
 
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 
 use swc_common::DUMMY_SP;
@@ -270,7 +272,7 @@ fn create_uid_binding(name: &str, _ctx: &TransformCtx) -> BindingIdent {
 
     // Simple UID generation - in production this should check for conflicts
     let uid_name = if name.starts_with('_') {
-        Atom::from(format!("{name}"))
+        Atom::from(name.to_string())
     } else {
         Atom::from(format!("_{name}"))
     };

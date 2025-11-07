@@ -64,6 +64,8 @@
 //! SWC version directly generates import statements or member expressions as
 //! needed.
 
+#![allow(dead_code)]
+
 use std::borrow::Cow;
 
 use rustc_hash::FxHashMap;

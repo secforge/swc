@@ -1,12 +1,13 @@
+#![allow(dead_code)]
 use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;
 
 use crate::compat::context::TransformCtx;
 
-mod async_to_generator;
+pub mod async_to_generator;
 mod options;
 
-pub use async_to_generator::AsyncToGenerator;
+pub use async_to_generator::{AsyncGeneratorExecutor, AsyncToGenerator};
 pub use options::ES2017Options;
 
 /// ES2017 transformation handler.

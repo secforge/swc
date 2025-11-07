@@ -47,6 +47,7 @@
 //! output `RegExp("(?<=x)")` instead of `RegExp("(?<=x)", "")`. (actually these
 //! would be improvements on ESBuild, not Babel)
 
+#![allow(dead_code)]
 use swc_atoms::Atom;
 use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
@@ -135,8 +136,7 @@ impl<'ctx> RegExp<'ctx> {
             {
                 Ok(pattern) => pattern,
                 Err(error) => {
-                    self.ctx
-                        .error(format!("Failed to parse regex: {:?}", error));
+                    self.ctx.error(format!("Failed to parse regex: {error:?}"));
                     return;
                 }
             };
@@ -145,15 +145,12 @@ impl<'ctx> RegExp<'ctx> {
             let mut checker = self.pattern_checker;
             pattern.visit_with(&mut checker);
 
-            if !checker.found_unsupported {
-                // No unsupported patterns found
-                return;
+            if checker.found_unsupported {
+                // At this point, we need to transform the regex
+                // The regex will be replaced by the visitor, so we don't need
+                // to do anything here
             }
         }
-
-        // At this point, we need to transform the regex
-        // The regex will be replaced by the visitor, so we don't need to do
-        // anything here
     }
 }
 
@@ -185,8 +182,7 @@ impl VisitMut for RegExp<'_> {
                 {
                     Ok(pattern) => pattern,
                     Err(error) => {
-                        self.ctx
-                            .error(format!("Failed to parse regex: {:?}", error));
+                        self.ctx.error(format!("Failed to parse regex: {error:?}"));
                         return;
                     }
                 };
@@ -254,13 +250,13 @@ struct PatternChecker {
 
 impl swc_ecma_regexp_visit::Visit for PatternChecker {
     fn visit_look_around_assertion(&mut self, node: &LookAroundAssertion) {
-        if self.look_behind_assertions {
-            if matches!(
+        if self.look_behind_assertions
+            && matches!(
                 node.kind,
                 LookAroundAssertionKind::Lookbehind | LookAroundAssertionKind::NegativeLookbehind
-            ) {
-                self.found_unsupported = true;
-            }
+            )
+        {
+            self.found_unsupported = true;
         }
         node.visit_children_with(self);
     }
@@ -315,12 +311,9 @@ bitflags::bitflags! {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use swc_common::DUMMY_SP;
 
     use super::*;
-    use crate::Config;
 
     #[test]
     fn test_parse_flags() {
@@ -335,8 +328,7 @@ mod tests {
 
     #[test]
     fn test_no_transformation_when_not_needed() {
-        let config = Config::default();
-        let ctx = TransformCtx::new(Path::new("test.js"), &config);
+        let ctx = TransformCtx::new(&crate::compat::options::TransformOptions::default());
         let options = RegExpOptions::default();
         let mut transform = RegExp::new(options, &ctx);
 
@@ -354,8 +346,7 @@ mod tests {
 
     #[test]
     fn test_transform_sticky_flag() {
-        let config = Config::default();
-        let ctx = TransformCtx::new(Path::new("test.js"), &config);
+        let ctx = TransformCtx::new(&crate::compat::options::TransformOptions::default());
         let options = RegExpOptions {
             sticky_flag: true,
             ..Default::default()

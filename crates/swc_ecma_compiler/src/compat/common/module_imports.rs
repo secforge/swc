@@ -32,6 +32,8 @@
 //! Based on `@babel/helper-module-imports`
 //! <https://github.com/nicolo-ribaudo/babel/tree/v7.25.8/packages/babel-helper-module-imports>
 
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 
 use indexmap::{map::Entry as IndexMapEntry, IndexMap};

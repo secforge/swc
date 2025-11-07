@@ -56,9 +56,9 @@ use crate::compat::context::TransformCtx;
 /// * [plugin-transform-react-jsx-self](https://babeljs.io/docs/babel-plugin-transform-react-jsx-self)
 /// * [plugin-transform-react-jsx-source](https://babel.dev/docs/babel-plugin-transform-react-jsx-source)
 /// * [plugin-transform-react-display-name](https://babeljs.io/docs/babel-plugin-transform-react-display-name)
-pub struct Jsx {
-    implementation: JsxImpl,
-    display_name: ReactDisplayName,
+pub struct Jsx<'ctx> {
+    implementation: JsxImpl<'ctx>,
+    display_name: ReactDisplayName<'ctx>,
     refresh: ReactRefresh,
     enable_jsx_plugin: bool,
     display_name_plugin: bool,
@@ -67,14 +67,14 @@ pub struct Jsx {
     refresh_plugin: bool,
 }
 
-impl Jsx {
+impl<'ctx> Jsx<'ctx> {
     /// Create a new JSX transformation instance
     ///
     /// # Arguments
     ///
     /// * `options` - JSX configuration options
     /// * `ctx` - Transform context
-    pub fn new(mut options: JsxOptions, ctx: &TransformCtx) -> Self {
+    pub fn new(mut options: JsxOptions, ctx: &'ctx TransformCtx) -> Self {
         if options.jsx_plugin || options.development {
             options.conform();
         }

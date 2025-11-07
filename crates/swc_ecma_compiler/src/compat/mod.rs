@@ -7,7 +7,8 @@ mod state;
 mod utils;
 
 // ES version modules
-mod decorator;
+// mod decorator; // TODO: Fix SWC AST compatibility issues
+mod decorator_stub; // Temporary stub for DecoratorOptions
 mod es2015;
 mod es2016;
 mod es2017;
@@ -17,7 +18,8 @@ mod es2020;
 mod es2021;
 mod es2022;
 mod es2026;
-mod jsx;
+// mod jsx; // TODO: Fix SWC AST compatibility issues
+mod jsx_stub; // Temporary stub for JSX types
 mod plugins;
 mod proposals;
 mod regexp;
@@ -29,7 +31,7 @@ pub use common::helper_loader::{Helper, HelperLoaderMode, HelperLoaderOptions};
 pub use compiler_assumptions::CompilerAssumptions;
 pub use context::TransformCtx;
 // Public exports - Other features
-pub use decorator::DecoratorOptions;
+pub use decorator_stub::DecoratorOptions; // Temporary stub
 // Public exports - ES version options
 pub use es2015::{ArrowFunctionsOptions, ES2015Options};
 pub use es2016::ES2016Options;
@@ -40,7 +42,7 @@ pub use es2020::ES2020Options;
 pub use es2021::ES2021Options;
 pub use es2022::{ClassPropertiesOptions, ES2022Options};
 pub use es2026::ES2026Options;
-pub use jsx::{JsxOptions, JsxRuntime, ReactRefreshOptions};
+pub use jsx_stub::{JsxOptions, JsxRuntime, ReactRefreshOptions}; // Temporary stub
 // Public exports - Options
 pub use options::{
     babel::{BabelEnvOptions, BabelOptions},

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use swc_atoms::Atom;
 use swc_common::{Span, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;

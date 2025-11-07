@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use swc_common::{util::take::Take, SyntaxContext, DUMMY_SP};
 use swc_ecma_ast::*;
 use swc_ecma_visit::{noop_visit_mut_type, VisitMut, VisitMutWith};
@@ -141,7 +142,7 @@ impl TypeScriptModule<'_> {
         let id = Pat::Ident(decl.id.clone().into());
 
         let init = match &mut decl.module_ref {
-            TsModuleRef::TsEntityName(entity_name) => self.transform_ts_entity_name(entity_name),
+            TsModuleRef::TsEntityName(entity_name) => Self::transform_ts_entity_name(entity_name),
             TsModuleRef::TsExternalModuleRef(external_ref) => {
                 if self.is_esm {
                     self.ctx
@@ -183,10 +184,10 @@ impl TypeScriptModule<'_> {
         Some(ModuleItem::Stmt(Stmt::Decl(Decl::Var(Box::new(var_decl)))))
     }
 
-    fn transform_ts_entity_name(&self, entity_name: &TsEntityName) -> Expr {
+    fn transform_ts_entity_name(entity_name: &TsEntityName) -> Expr {
         match entity_name {
             TsEntityName::TsQualifiedName(qualified_name) => {
-                let obj = Box::new(self.transform_ts_entity_name(&qualified_name.left));
+                let obj = Box::new(Self::transform_ts_entity_name(&qualified_name.left));
                 let prop = MemberProp::Ident(qualified_name.right.clone());
                 Expr::Member(MemberExpr {
                     span: DUMMY_SP,

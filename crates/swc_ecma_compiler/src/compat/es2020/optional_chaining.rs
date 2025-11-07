@@ -46,10 +46,11 @@
 //! * Babel implementation: <https://github.com/babel/babel/tree/v7.26.2/packages/babel-plugin-transform-optional-chaining>
 //! * Optional chaining TC39 proposal: <https://github.com/tc39/proposal-optional-chaining>
 
+#![allow(dead_code)]
 use std::mem;
 
 use swc_atoms::Atom;
-use swc_common::{util::take::Take, DUMMY_SP};
+use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
 use swc_ecma_hooks::VisitMutHook;
 
@@ -157,68 +158,127 @@ impl<'ctx> OptionalChaining<'ctx> {
     fn transform_optional_member(&mut self, expr: &mut Expr) -> bool {
         let mut transformed = false;
 
-        match expr {
-            Expr::OptChain(opt_chain) => {
-                // This is an optional chaining expression
-                let base = mem::take(&mut *opt_chain.base);
+        if let Expr::OptChain(opt_chain) = expr {
+            // This is an optional chaining expression
+            let base = mem::take(&mut *opt_chain.base);
 
-                match base {
-                    OptChainBase::Member(mut member) => {
-                        // Transform the object recursively
-                        self.transform_optional_member(&mut member.obj);
+            match base {
+                OptChainBase::Member(mut member) => {
+                    // Transform the object recursively
+                    self.transform_optional_member(&mut member.obj);
 
-                        if member.obj.is_ident() {
-                            // Simple case: `foo?.bar`
-                            let ident = member.obj.as_ident().unwrap().clone();
-                            let obj_expr = Expr::Ident(ident.clone());
+                    if member.obj.is_ident() {
+                        // Simple case: `foo?.bar`
+                        let ident = member.obj.as_ident().unwrap().clone();
+                        let obj_expr = Expr::Ident(ident.clone());
 
-                            // Create the non-optional member expression
-                            let member_expr = Expr::Member(MemberExpr {
-                                span: member.span,
-                                obj: Box::new(Expr::Ident(ident.clone())),
-                                prop: member.prop,
-                            });
+                        // Create the non-optional member expression
+                        let member_expr = Expr::Member(MemberExpr {
+                            span: member.span,
+                            obj: Box::new(Expr::Ident(ident.clone())),
+                            prop: member.prop,
+                        });
 
-                            // Create the conditional
+                        // Create the conditional
+                        let test = if self.ctx.assumptions.no_document_all {
+                            self.create_null_check(obj_expr)
+                        } else {
+                            self.create_nullish_check(
+                                Expr::Ident(ident.clone()),
+                                Expr::Ident(ident),
+                            )
+                        };
+
+                        *expr = Expr::Cond(CondExpr {
+                            span: DUMMY_SP,
+                            test: Box::new(test),
+                            cons: Box::new(Self::create_void_0()),
+                            alt: Box::new(member_expr),
+                        });
+                        transformed = true;
+                    } else {
+                        // Complex case: need to create a temporary variable
+                        let binding = self.generate_uid("temp");
+                        self.var_declarations.insert_var(&binding, None);
+
+                        // Create assignment: `_temp = obj`
+                        let assignment = Expr::Assign(AssignExpr {
+                            span: DUMMY_SP,
+                            op: op!("="),
+                            left: AssignTarget::Simple(SimpleAssignTarget::Ident(binding.clone())),
+                            right: Box::new(*member.obj),
+                        });
+
+                        // Create member expression using the temp variable
+                        let member_expr = Expr::Member(MemberExpr {
+                            span: member.span,
+                            obj: Box::new(Expr::Ident(binding.id.clone())),
+                            prop: member.prop,
+                        });
+
+                        // Create the test
+                        let test = if self.ctx.assumptions.no_document_all {
+                            self.create_null_check(assignment)
+                        } else {
+                            self.create_nullish_check(assignment, Expr::Ident(binding.id.clone()))
+                        };
+
+                        *expr = Expr::Cond(CondExpr {
+                            span: DUMMY_SP,
+                            test: Box::new(test),
+                            cons: Box::new(Self::create_void_0()),
+                            alt: Box::new(member_expr),
+                        });
+                        transformed = true;
+                    }
+                }
+                OptChainBase::Call(mut call) => {
+                    // Handle optional call: `foo?.()`
+                    // For simplicity, transform to: `foo === null || foo === void 0 ? void 0 :
+                    // foo()`
+                    let callee_box = mem::take(&mut call.callee);
+                    let callee_expr = *callee_box;
+
+                    match &callee_expr {
+                        Expr::Ident(ident) => {
                             let test = if self.ctx.assumptions.no_document_all {
-                                self.create_null_check(obj_expr)
+                                self.create_null_check(Expr::Ident(ident.clone()))
                             } else {
                                 self.create_nullish_check(
                                     Expr::Ident(ident.clone()),
-                                    Expr::Ident(ident),
+                                    Expr::Ident(ident.clone()),
                                 )
                             };
+
+                            let call_expr = Expr::Call(CallExpr {
+                                span: call.span,
+                                callee: Callee::Expr(Box::new(Expr::Ident(ident.clone()))),
+                                args: call.args,
+                                ..Default::default()
+                            });
 
                             *expr = Expr::Cond(CondExpr {
                                 span: DUMMY_SP,
                                 test: Box::new(test),
                                 cons: Box::new(Self::create_void_0()),
-                                alt: Box::new(member_expr),
+                                alt: Box::new(call_expr),
                             });
                             transformed = true;
-                        } else {
-                            // Complex case: need to create a temporary variable
+                        }
+                        _ => {
+                            // Complex callee - create temp variable
                             let binding = self.generate_uid("temp");
                             self.var_declarations.insert_var(&binding, None);
 
-                            // Create assignment: `_temp = obj`
                             let assignment = Expr::Assign(AssignExpr {
                                 span: DUMMY_SP,
                                 op: op!("="),
                                 left: AssignTarget::Simple(SimpleAssignTarget::Ident(
                                     binding.clone(),
                                 )),
-                                right: Box::new(*member.obj),
+                                right: Box::new(callee_expr),
                             });
 
-                            // Create member expression using the temp variable
-                            let member_expr = Expr::Member(MemberExpr {
-                                span: member.span,
-                                obj: Box::new(Expr::Ident(binding.id.clone())),
-                                prop: member.prop,
-                            });
-
-                            // Create the test
                             let test = if self.ctx.assumptions.no_document_all {
                                 self.create_null_check(assignment)
                             } else {
@@ -228,91 +288,24 @@ impl<'ctx> OptionalChaining<'ctx> {
                                 )
                             };
 
+                            let call_expr = Expr::Call(CallExpr {
+                                span: call.span,
+                                callee: Callee::Expr(Box::new(Expr::Ident(binding.id))),
+                                args: call.args,
+                                ..Default::default()
+                            });
+
                             *expr = Expr::Cond(CondExpr {
                                 span: DUMMY_SP,
                                 test: Box::new(test),
                                 cons: Box::new(Self::create_void_0()),
-                                alt: Box::new(member_expr),
+                                alt: Box::new(call_expr),
                             });
                             transformed = true;
                         }
                     }
-                    OptChainBase::Call(mut call) => {
-                        // Handle optional call: `foo?.()`
-                        // For simplicity, transform to: `foo === null || foo === void 0 ? void 0 :
-                        // foo()`
-                        let callee_box = mem::take(&mut call.callee);
-                        let callee_expr = *callee_box;
-
-                        match &callee_expr {
-                            Expr::Ident(ident) => {
-                                let test = if self.ctx.assumptions.no_document_all {
-                                    self.create_null_check(Expr::Ident(ident.clone()))
-                                } else {
-                                    self.create_nullish_check(
-                                        Expr::Ident(ident.clone()),
-                                        Expr::Ident(ident.clone()),
-                                    )
-                                };
-
-                                let call_expr = Expr::Call(CallExpr {
-                                    span: call.span,
-                                    callee: Callee::Expr(Box::new(Expr::Ident(ident.clone()))),
-                                    args: call.args,
-                                    ..Default::default()
-                                });
-
-                                *expr = Expr::Cond(CondExpr {
-                                    span: DUMMY_SP,
-                                    test: Box::new(test),
-                                    cons: Box::new(Self::create_void_0()),
-                                    alt: Box::new(call_expr),
-                                });
-                                transformed = true;
-                            }
-                            _ => {
-                                // Complex callee - create temp variable
-                                let binding = self.generate_uid("temp");
-                                self.var_declarations.insert_var(&binding, None);
-
-                                let assignment = Expr::Assign(AssignExpr {
-                                    span: DUMMY_SP,
-                                    op: op!("="),
-                                    left: AssignTarget::Simple(SimpleAssignTarget::Ident(
-                                        binding.clone(),
-                                    )),
-                                    right: Box::new(callee_expr),
-                                });
-
-                                let test = if self.ctx.assumptions.no_document_all {
-                                    self.create_null_check(assignment)
-                                } else {
-                                    self.create_nullish_check(
-                                        assignment,
-                                        Expr::Ident(binding.id.clone()),
-                                    )
-                                };
-
-                                let call_expr = Expr::Call(CallExpr {
-                                    span: call.span,
-                                    callee: Callee::Expr(Box::new(Expr::Ident(binding.id))),
-                                    args: call.args,
-                                    ..Default::default()
-                                });
-
-                                *expr = Expr::Cond(CondExpr {
-                                    span: DUMMY_SP,
-                                    test: Box::new(test),
-                                    cons: Box::new(Self::create_void_0()),
-                                    alt: Box::new(call_expr),
-                                });
-                                transformed = true;
-                            }
-                        }
-                    }
                 }
             }
-            _ => {}
         }
 
         transformed
@@ -349,12 +342,10 @@ impl VisitMutHook for OptionalChaining<'_> {
     fn exit_module(&mut self, module: &mut Module) {
         // Insert variable declarations at the top of the module
         for item in &mut module.body {
-            if let ModuleItem::Stmt(stmt) = item {
-                if let Stmt::Block(block) = stmt {
-                    self.var_declarations
-                        .insert_into_statements(&mut block.stmts);
-                    break;
-                }
+            if let ModuleItem::Stmt(Stmt::Block(block)) = item {
+                self.var_declarations
+                    .insert_into_statements(&mut block.stmts);
+                break;
             }
         }
     }

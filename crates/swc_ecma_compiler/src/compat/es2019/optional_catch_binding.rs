@@ -33,6 +33,7 @@
 //! * Babel plugin implementation: <https://github.com/babel/babel/tree/v7.26.2/packages/babel-plugin-transform-optional-catch-binding>
 //! * Optional catch binding TC39 proposal: <https://github.com/tc39/proposal-optional-catch-binding>
 
+#![allow(dead_code)]
 use swc_atoms::Atom;
 use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
@@ -80,11 +81,9 @@ mod tests {
 
     /// Helper to create a test TransformCtx
     fn create_test_ctx() -> TransformCtx {
-        use std::path::Path;
+        use crate::compat::options::TransformOptions;
 
-        use crate::Config;
-
-        TransformCtx::new(Path::new("test.js"), &Config::default())
+        TransformCtx::new(&TransformOptions::default())
     }
 
     #[test]

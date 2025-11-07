@@ -26,6 +26,7 @@
 //! - ES2021 specification: <https://262.ecma-international.org/12.0/>
 //! - Babel preset-env: <https://babeljs.io/docs/babel-preset-env>
 
+#![allow(dead_code)]
 use swc_ecma_hooks::VisitMutHook;
 
 use crate::compat::context::TransformCtx;

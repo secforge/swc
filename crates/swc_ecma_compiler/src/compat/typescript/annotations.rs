@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use swc_common::util::take::Take;
 use swc_ecma_ast::*;
 use swc_ecma_visit::{noop_visit_mut_type, VisitMut, VisitMutWith};
@@ -136,7 +137,7 @@ impl VisitMut for TypeScriptAnnotations<'_> {
         // Remove type-only members
         class.body.retain(|member| match member {
             ClassMember::Constructor(_) => true,
-            ClassMember::Method(method) => !method.function.body.is_none(),
+            ClassMember::Method(method) => method.function.body.is_some(),
             ClassMember::PrivateMethod(_) => true,
             ClassMember::ClassProp(prop) => {
                 // Keep if not declare-only

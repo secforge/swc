@@ -1,7 +1,11 @@
 use serde::Deserialize;
 
 use super::PluginPresetEntries;
-use crate::compat::{jsx::JsxOptions, options::EnvOptions, typescript::TypeScriptOptions};
+use crate::compat::{
+    jsx_stub::JsxOptions, // Temporary stub
+    options::EnvOptions,
+    typescript::TypeScriptOptions,
+};
 
 /// Babel presets configuration
 ///
