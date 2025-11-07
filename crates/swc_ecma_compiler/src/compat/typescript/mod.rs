@@ -24,7 +24,8 @@
 //! Out: `const x = 0;`
 
 use swc_ecma_ast::*;
-use swc_ecma_visit::{noop_visit_mut_type, VisitMut, VisitMutWith};
+use swc_ecma_hooks::VisitMutHook;
+use swc_ecma_visit::VisitMut;
 
 use crate::compat::context::TransformCtx;
 
@@ -88,11 +89,10 @@ impl<'a> TypeScript<'a> {
     }
 }
 
-impl VisitMut for TypeScript<'_> {
-    noop_visit_mut_type!();
-
-    fn visit_mut_module(&mut self, module: &mut Module) {
+impl VisitMutHook for TypeScript<'_> {
+    fn enter_module(&mut self, module: &mut Module) {
         // First, handle module-level transformations
+        // Note: sub-modules still use VisitMut, so we call their visit_mut_* methods
         self.module.visit_mut_module(module);
         self.namespace.visit_mut_module(module);
         self.r#enum.visit_mut_module(module);
@@ -102,24 +102,21 @@ impl VisitMut for TypeScript<'_> {
 
         // Finally, rewrite import extensions if configured
         if let Some(rewrite) = &mut self.rewrite_extensions {
-            rewrite.visit_mut_module(module);
+            rewrite.enter_module(module);
         }
-
-        // Visit children with all visitors
-        module.visit_mut_children_with(self);
     }
 
-    fn visit_mut_script(&mut self, script: &mut Script) {
+    fn enter_script(&mut self, script: &mut Script) {
         // Handle script mode (non-module)
+        // Note: annotations still uses VisitMut
         self.annotations.visit_mut_script(script);
-        script.visit_mut_children_with(self);
     }
 
-    fn visit_mut_class(&mut self, class: &mut Class) {
+    fn enter_class(&mut self, class: &mut Class) {
         // Apply class transformations
+        // Note: sub-modules still use VisitMut
         self.class.visit_mut_class(class);
         self.annotations.visit_mut_class(class);
-        class.visit_mut_children_with(self);
     }
 }
 

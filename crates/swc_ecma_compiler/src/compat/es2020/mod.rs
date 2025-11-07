@@ -29,7 +29,7 @@
 //! - Babel preset-env: <https://babeljs.io/docs/babel-preset-env>
 
 use swc_ecma_ast::*;
-use swc_ecma_visit::{VisitMut, VisitMutWith};
+use swc_ecma_hooks::VisitMutHook;
 
 use crate::compat::context::TransformCtx;
 
@@ -76,41 +76,80 @@ impl<'ctx> ES2020<'ctx> {
     }
 }
 
-impl VisitMut for ES2020<'_> {
-    fn visit_mut_module(&mut self, module: &mut Module) {
-        // Apply export namespace from transformation first (module-level)
-        if self.options.export_namespace_from {
-            self.export_namespace_from.visit_mut_module(module);
-        }
-
-        // Then visit children for expression-level transformations
-        module.visit_mut_children_with(self);
-    }
-
-    fn visit_mut_expr(&mut self, expr: &mut Expr) {
-        // Visit children first
-        expr.visit_mut_children_with(self);
-
-        // Apply nullish coalescing operator transformation
+impl VisitMutHook for ES2020<'_> {
+    fn enter_module(&mut self, module: &mut Module) {
         if self.options.nullish_coalescing_operator {
-            self.nullish_coalescing_operator.visit_mut_expr(expr);
+            self.nullish_coalescing_operator.enter_module(module);
         }
-
-        // Apply optional chaining transformation
         if self.options.optional_chaining {
-            self.optional_chaining.visit_mut_expr(expr);
+            self.optional_chaining.enter_module(module);
         }
     }
 
-    fn visit_mut_param(&mut self, param: &mut Param) {
+    fn exit_module(&mut self, module: &mut Module) {
+        // Apply exit hooks for expression-level transformations first
+        if self.options.nullish_coalescing_operator {
+            self.nullish_coalescing_operator.exit_module(module);
+        }
         if self.options.optional_chaining {
-            self.optional_chaining.visit_mut_param(param);
-        } else {
-            param.visit_mut_children_with(self);
+            self.optional_chaining.exit_module(module);
+        }
+
+        // Apply export namespace from transformation last (module-level)
+        if self.options.export_namespace_from {
+            self.export_namespace_from.exit_module(module);
         }
     }
 
-    fn visit_mut_big_int(&mut self, big_int: &mut BigInt) {
+    fn enter_block_stmt(&mut self, block: &mut BlockStmt) {
+        if self.options.nullish_coalescing_operator {
+            self.nullish_coalescing_operator.enter_block_stmt(block);
+        }
+        if self.options.optional_chaining {
+            self.optional_chaining.enter_block_stmt(block);
+        }
+    }
+
+    fn exit_block_stmt(&mut self, block: &mut BlockStmt) {
+        if self.options.nullish_coalescing_operator {
+            self.nullish_coalescing_operator.exit_block_stmt(block);
+        }
+        if self.options.optional_chaining {
+            self.optional_chaining.exit_block_stmt(block);
+        }
+    }
+
+    fn enter_expr(&mut self, expr: &mut Expr) {
+        if self.options.optional_chaining {
+            self.optional_chaining.enter_expr(expr);
+        }
+    }
+
+    fn exit_expr(&mut self, expr: &mut Expr) {
+        // Apply nullish coalescing operator transformation first
+        if self.options.nullish_coalescing_operator {
+            self.nullish_coalescing_operator.exit_expr(expr);
+        }
+
+        // Apply optional chaining transformation after
+        if self.options.optional_chaining {
+            self.optional_chaining.exit_expr(expr);
+        }
+    }
+
+    fn enter_param(&mut self, param: &mut Param) {
+        if self.options.optional_chaining {
+            self.optional_chaining.enter_param(param);
+        }
+    }
+
+    fn exit_param(&mut self, param: &mut Param) {
+        if self.options.optional_chaining {
+            self.optional_chaining.exit_param(param);
+        }
+    }
+
+    fn enter_big_int(&mut self, big_int: &mut BigInt) {
         if self.options.big_int {
             self.ctx.error(format!(
                 "Big integer literals are not available in the configured target environment. \
@@ -120,7 +159,7 @@ impl VisitMut for ES2020<'_> {
         }
     }
 
-    fn visit_mut_import_named_specifier(&mut self, specifier: &mut ImportNamedSpecifier) {
+    fn enter_import_named_specifier(&mut self, specifier: &mut ImportNamedSpecifier) {
         if self.options.arbitrary_module_namespace_names {
             if let Some(ModuleExportName::Str(_)) = &specifier.imported {
                 self.ctx.error(format!(
@@ -130,10 +169,9 @@ impl VisitMut for ES2020<'_> {
                 ));
             }
         }
-        specifier.visit_mut_children_with(self);
     }
 
-    fn visit_mut_export_named_specifier(&mut self, specifier: &mut ExportNamedSpecifier) {
+    fn enter_export_named_specifier(&mut self, specifier: &mut ExportNamedSpecifier) {
         if self.options.arbitrary_module_namespace_names {
             if let Some(ModuleExportName::Str(_)) = &specifier.exported {
                 self.ctx.error(format!(
@@ -150,11 +188,5 @@ impl VisitMut for ES2020<'_> {
                 ));
             }
         }
-        specifier.visit_mut_children_with(self);
-    }
-
-    fn visit_mut_export_all(&mut self, export_all: &mut ExportAll) {
-        // TODO: Add proper warning for arbitrary module namespace names if needed
-        export_all.visit_mut_children_with(self);
     }
 }

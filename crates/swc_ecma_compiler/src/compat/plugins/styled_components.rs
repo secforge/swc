@@ -66,7 +66,7 @@ use serde::Deserialize;
 use swc_atoms::Atom;
 use swc_common::{Span, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_visit::{VisitMut, VisitMutWith};
+use swc_ecma_hooks::VisitMutHook;
 
 use crate::compat::context::TransformCtx;
 
@@ -326,37 +326,28 @@ impl<'ctx> StyledComponents<'ctx> {
     }
 }
 
-impl VisitMut for StyledComponents<'_> {
-    fn visit_mut_module(&mut self, module: &mut Module) {
+impl VisitMutHook for StyledComponents<'_> {
+    fn enter_module(&mut self, module: &mut Module) {
         self.collect_styled_bindings_from_module(module);
-        module.visit_mut_children_with(self);
     }
 
-    fn visit_mut_script(&mut self, script: &mut Script) {
-        // Scripts don't have imports, so no bindings to collect
-        script.visit_mut_children_with(self);
-    }
-
-    fn visit_mut_var_declarator(&mut self, var_declarator: &mut VarDeclarator) {
+    fn enter_var_declarator(&mut self, var_declarator: &mut VarDeclarator) {
         self.handle_pure_annotation(var_declarator);
-        var_declarator.visit_mut_children_with(self);
     }
 
-    fn visit_mut_expr(&mut self, expr: &mut Expr) {
+    fn enter_expr(&mut self, expr: &mut Expr) {
         if matches!(expr, Expr::TaggedTpl(_)) {
             self.transform_tagged_template_expression(expr);
         }
-        expr.visit_mut_children_with(self);
     }
 
-    fn visit_mut_call_expr(&mut self, call: &mut CallExpr) {
+    fn enter_call_expr(&mut self, call: &mut CallExpr) {
         if self.options.display_name || self.options.ssr {
             // Only transform call expression that is not a part of a member expression
             // or a callee of another call expression.
             // This check is implicitly handled by visiting in the right order
             self.add_display_name_and_component_id_to_call(&mut call.callee);
         }
-        call.visit_mut_children_with(self);
     }
 }
 

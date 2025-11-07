@@ -6,7 +6,7 @@
 //! Based on Babel's [plugin-rewrite-ts-imports](https://github.com/babel/babel/blob/3bcfee232506a4cebe410f02042fb0f0adeeb0b1/packages/babel-preset-typescript/src/plugin-rewrite-ts-imports.ts)
 
 use swc_ecma_ast::*;
-use swc_ecma_visit::{noop_visit_mut_type, VisitMut};
+use swc_ecma_hooks::VisitMutHook;
 
 use super::options::RewriteExtensionsMode;
 
@@ -47,17 +47,15 @@ impl TypeScriptRewriteExtensions {
     }
 }
 
-impl VisitMut for TypeScriptRewriteExtensions {
-    noop_visit_mut_type!();
-
-    fn visit_mut_import_decl(&mut self, node: &mut ImportDecl) {
+impl VisitMutHook for TypeScriptRewriteExtensions {
+    fn enter_import_decl(&mut self, node: &mut ImportDecl) {
         if node.type_only {
             return;
         }
         self.rewrite_extensions(&mut node.src);
     }
 
-    fn visit_mut_named_export(&mut self, node: &mut NamedExport) {
+    fn enter_named_export(&mut self, node: &mut NamedExport) {
         if node.type_only {
             return;
         }
@@ -66,7 +64,7 @@ impl VisitMut for TypeScriptRewriteExtensions {
         }
     }
 
-    fn visit_mut_export_all(&mut self, node: &mut ExportAll) {
+    fn enter_export_all(&mut self, node: &mut ExportAll) {
         if node.type_only {
             return;
         }

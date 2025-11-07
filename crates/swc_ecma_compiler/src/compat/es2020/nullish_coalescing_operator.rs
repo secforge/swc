@@ -34,7 +34,7 @@ use std::mem;
 use swc_atoms::Atom;
 use swc_common::DUMMY_SP;
 use swc_ecma_ast::*;
-use swc_ecma_visit::{VisitMut, VisitMutWith};
+use swc_ecma_hooks::VisitMutHook;
 
 use crate::compat::{common::var_declarations::VarDeclarationsStore, context::TransformCtx};
 
@@ -187,11 +187,8 @@ impl<'ctx> NullishCoalescingOperator<'ctx> {
     }
 }
 
-impl VisitMut for NullishCoalescingOperator<'_> {
-    fn visit_mut_expr(&mut self, expr: &mut Expr) {
-        // First visit children
-        expr.visit_mut_children_with(self);
-
+impl VisitMutHook for NullishCoalescingOperator<'_> {
+    fn exit_expr(&mut self, expr: &mut Expr) {
         // Check if this is a nullish coalescing operator
         if let Expr::Bin(BinExpr {
             op: op!("??"),
@@ -207,13 +204,12 @@ impl VisitMut for NullishCoalescingOperator<'_> {
         }
     }
 
-    fn visit_mut_module(&mut self, module: &mut Module) {
+    fn enter_module(&mut self, _module: &mut Module) {
         // Record entering statements
         self.var_declarations.record_entering_statements();
+    }
 
-        // Visit the module
-        module.visit_mut_children_with(self);
-
+    fn exit_module(&mut self, module: &mut Module) {
         // Insert variable declarations at the top of the module
         for item in &mut module.body {
             if let ModuleItem::Stmt(stmt) = item {
@@ -226,13 +222,12 @@ impl VisitMut for NullishCoalescingOperator<'_> {
         }
     }
 
-    fn visit_mut_block_stmt(&mut self, block: &mut BlockStmt) {
+    fn enter_block_stmt(&mut self, _block: &mut BlockStmt) {
         // Record entering statements
         self.var_declarations.record_entering_statements();
+    }
 
-        // Visit the block
-        block.visit_mut_children_with(self);
-
+    fn exit_block_stmt(&mut self, block: &mut BlockStmt) {
         // Insert variable declarations
         self.var_declarations
             .insert_into_statements(&mut block.stmts);

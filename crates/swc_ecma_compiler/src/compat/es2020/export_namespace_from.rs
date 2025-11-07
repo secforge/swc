@@ -27,7 +27,7 @@ use swc_ecma_ast::{
     ExportNamedSpecifier, ExportSpecifier, Ident, ImportDecl, ImportSpecifier,
     ImportStarAsSpecifier, Module, ModuleDecl, ModuleExportName, ModuleItem, NamedExport,
 };
-use swc_ecma_visit::VisitMut;
+use swc_ecma_hooks::VisitMutHook;
 
 /// Transforms `export * as ns from "mod"` to separate import/export statements.
 pub struct ExportNamespaceFrom {
@@ -134,8 +134,8 @@ impl ExportNamespaceFrom {
     }
 }
 
-impl VisitMut for ExportNamespaceFrom {
-    fn visit_mut_module(&mut self, module: &mut Module) {
+impl VisitMutHook for ExportNamespaceFrom {
+    fn exit_module(&mut self, module: &mut Module) {
         // First collect all export namespace declarations that need transformation
         let mut to_transform = vec![];
 

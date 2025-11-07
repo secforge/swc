@@ -51,7 +51,7 @@ use std::mem;
 use swc_atoms::Atom;
 use swc_common::{util::take::Take, DUMMY_SP};
 use swc_ecma_ast::*;
-use swc_ecma_visit::{VisitMut, VisitMutWith};
+use swc_ecma_hooks::VisitMutHook;
 
 use crate::compat::{
     common::var_declarations::VarDeclarationsStore, context::TransformCtx,
@@ -319,36 +319,34 @@ impl<'ctx> OptionalChaining<'ctx> {
     }
 }
 
-impl VisitMut for OptionalChaining<'_> {
-    fn visit_mut_expr(&mut self, expr: &mut Expr) {
+impl VisitMutHook for OptionalChaining<'_> {
+    fn enter_expr(&mut self, expr: &mut Expr) {
         // Handle optional chaining in function parameters specially
         if self.is_inside_function_parameter && matches!(expr, Expr::OptChain(_)) {
             let taken = mem::replace(expr, Expr::Invalid(Invalid { span: DUMMY_SP }));
             *expr = wrap_expression_in_arrow_function_iife(Box::new(taken), DUMMY_SP);
-            return;
         }
+    }
 
-        // First visit children
-        expr.visit_mut_children_with(self);
-
-        // Transform optional chaining
+    fn exit_expr(&mut self, expr: &mut Expr) {
+        // Transform optional chaining after visiting children
         self.transform_optional_member(expr);
     }
 
-    fn visit_mut_param(&mut self, param: &mut Param) {
-        let old_state = self.is_inside_function_parameter;
+    fn enter_param(&mut self, _param: &mut Param) {
         self.is_inside_function_parameter = true;
-        param.visit_mut_children_with(self);
-        self.is_inside_function_parameter = old_state;
     }
 
-    fn visit_mut_module(&mut self, module: &mut Module) {
+    fn exit_param(&mut self, _param: &mut Param) {
+        self.is_inside_function_parameter = false;
+    }
+
+    fn enter_module(&mut self, _module: &mut Module) {
         // Record entering statements
         self.var_declarations.record_entering_statements();
+    }
 
-        // Visit the module
-        module.visit_mut_children_with(self);
-
+    fn exit_module(&mut self, module: &mut Module) {
         // Insert variable declarations at the top of the module
         for item in &mut module.body {
             if let ModuleItem::Stmt(stmt) = item {
@@ -361,13 +359,12 @@ impl VisitMut for OptionalChaining<'_> {
         }
     }
 
-    fn visit_mut_block_stmt(&mut self, block: &mut BlockStmt) {
+    fn enter_block_stmt(&mut self, _block: &mut BlockStmt) {
         // Record entering statements
         self.var_declarations.record_entering_statements();
+    }
 
-        // Visit the block
-        block.visit_mut_children_with(self);
-
+    fn exit_block_stmt(&mut self, block: &mut BlockStmt) {
         // Insert variable declarations
         self.var_declarations
             .insert_into_statements(&mut block.stmts);
