@@ -53,4 +53,14 @@ pub trait Tokens<TokenAndSpan>: Clone + Iterator<Item = TokenAndSpan> {
     fn take_script_module_errors(&mut self) -> Vec<Error>;
     fn update_token_flags(&mut self, f: impl FnOnce(&mut lexer::TokenFlags));
     fn token_flags(&self) -> lexer::TokenFlags;
+
+    fn generic_depth(&self) -> u8 {
+        0
+    }
+
+    fn set_generic_depth(&mut self, _depth: u8) {}
+
+    fn is_in_generic_mode(&self) -> bool {
+        self.generic_depth() > 0
+    }
 }

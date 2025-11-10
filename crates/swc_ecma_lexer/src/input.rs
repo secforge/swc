@@ -27,6 +27,7 @@ pub struct TokensInput {
     token_ctx: TokenContexts,
     errors: Rc<RefCell<Vec<Error>>>,
     module_errors: Rc<RefCell<Vec<Error>>>,
+    generic_depth: u8,
 }
 
 impl TokensInput {
@@ -42,6 +43,7 @@ impl TokensInput {
             token_ctx: Default::default(),
             errors: Default::default(),
             module_errors: Default::default(),
+            generic_depth: 0,
         }
     }
 }
@@ -157,6 +159,14 @@ impl Tokens<TokenAndSpan> for TokensInput {
 
     fn token_flags(&self) -> lexer::TokenFlags {
         Default::default()
+    }
+
+    fn generic_depth(&self) -> u8 {
+        self.generic_depth
+    }
+
+    fn set_generic_depth(&mut self, depth: u8) {
+        self.generic_depth = depth;
     }
 }
 
@@ -311,12 +321,20 @@ impl<I: Tokens<TokenAndSpan>> Tokens<TokenAndSpan> for Capturing<I> {
     }
 
     #[inline]
-    fn update_token_flags(&mut self, _: impl FnOnce(&mut lexer::TokenFlags)) {
-        // TODO: Implement this method if needed.
+    fn update_token_flags(&mut self, f: impl FnOnce(&mut lexer::TokenFlags)) {
+        self.inner.update_token_flags(f);
     }
 
     fn token_flags(&self) -> lexer::TokenFlags {
-        Default::default()
+        self.inner.token_flags()
+    }
+
+    fn generic_depth(&self) -> u8 {
+        self.inner.generic_depth()
+    }
+
+    fn set_generic_depth(&mut self, depth: u8) {
+        self.inner.set_generic_depth(depth);
     }
 }
 

@@ -43,6 +43,7 @@ pub struct State {
 
     pub(super) token_value: Option<TokenValue>,
     token_type: Option<Token>,
+    pub generic_depth: u8,
 }
 
 pub struct LexerCheckpoint {
@@ -168,6 +169,14 @@ impl<'a> swc_ecma_lexer::common::input::Tokens<TokenAndSpan> for Lexer<'a> {
     #[inline]
     fn token_flags(&self) -> swc_ecma_lexer::lexer::TokenFlags {
         self.token_flags
+    }
+
+    fn generic_depth(&self) -> u8 {
+        self.state.generic_depth
+    }
+
+    fn set_generic_depth(&mut self, depth: u8) {
+        self.state.generic_depth = depth;
     }
 }
 
@@ -614,6 +623,7 @@ impl State {
             prev_hi: start_pos,
             token_value: None,
             token_type: None,
+            generic_depth: 0,
         }
     }
 

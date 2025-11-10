@@ -247,10 +247,10 @@ impl Lexer<'_> {
         let start = self.cur_pos();
         self.bump();
 
-        if self.syntax.typescript()
-            && self.ctx.contains(Context::InType)
-            && !self.ctx.contains(Context::ShouldNotLexLtOrGtAsType)
-        {
+        let should_treat_as_type = self.syntax.typescript()
+            && (self.state.generic_depth > 0 || self.ctx.contains(Context::InType));
+
+        if should_treat_as_type {
             if C == b'<' {
                 return Ok(Token::Lt);
             } else if C == b'>' {

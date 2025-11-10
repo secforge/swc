@@ -597,7 +597,9 @@ fn parse_subscript<'a, P: Parser<'a>>(
             ));
         }
 
-        if matches!(obj, Callee::Expr(..)) && p.input().is(&P::Token::LESS) {
+        if matches!(obj, Callee::Expr(..))
+            && (p.input().is(&P::Token::LESS) || p.input().is(&P::Token::LSHIFT))
+        {
             let is_dynamic_import = obj.is_import();
 
             let mut obj_opt = Some(obj);
@@ -608,99 +610,100 @@ fn parse_subscript<'a, P: Parser<'a>>(
 
             let mut_obj_opt = &mut obj_opt;
 
-            let result = p.do_inside_of_context(Context::ShouldNotLexLtOrGtAsType, |p| {
-                try_parse_ts(p, |p| {
-                    if !no_call
-                        && at_possible_async(
-                            p,
-                            match &mut_obj_opt {
-                                Some(Callee::Expr(ref expr)) => expr,
-                                _ => unreachable!(),
-                            },
-                        )
-                    {
-                        // Almost certainly this is a generic async function `async <T>() => ...
-                        // But it might be a call with a type argument `async<T>();`
-                        let async_arrow_fn = try_parse_ts_generic_async_arrow_fn(p, start)?;
-                        if let Some(async_arrow_fn) = async_arrow_fn {
-                            return Ok(Some((async_arrow_fn.into(), true)));
+            let result = try_parse_ts(p, |p| {
+                if !no_call
+                    && at_possible_async(
+                        p,
+                        match &mut_obj_opt {
+                            Some(Callee::Expr(ref expr)) => expr,
+                            _ => unreachable!(),
+                        },
+                    )
+                {
+                    // Almost certainly this is a generic async function `async <T>() => ...
+                    // But it might be a call with a type argument `async<T>();`
+                    let async_arrow_fn = try_parse_ts_generic_async_arrow_fn(p, start)?;
+                    if let Some(async_arrow_fn) = async_arrow_fn {
+                        return Ok(Some((async_arrow_fn.into(), true)));
+                    }
+                }
+
+                let type_args = p.do_in_generic(|p| {
+                    let type_args = parse_ts_type_args(p)?;
+                    p.assert_and_bump(&P::Token::GREATER);
+                    Ok(type_args)
+                })?;
+                let cur = p.input().cur();
+
+                if !no_call && cur.is_lparen() {
+                    // possibleAsync always false here, because we would have handled it
+                    // above. (won't be any undefined arguments)
+                    let args = parse_args(p, is_dynamic_import)?;
+
+                    let obj = mut_obj_opt.take().unwrap();
+
+                    if let Callee::Expr(callee) = &obj {
+                        if let Expr::OptChain(..) = &**callee {
+                            return Ok(Some((
+                                OptChainExpr {
+                                    span: p.span(start),
+                                    base: Box::new(OptChainBase::Call(OptCall {
+                                        span: p.span(start),
+                                        callee: obj.expect_expr(),
+                                        type_args: Some(type_args),
+                                        args,
+                                        ..Default::default()
+                                    })),
+                                    optional: false,
+                                }
+                                .into(),
+                                true,
+                            )));
                         }
                     }
 
-                    let type_args = parse_ts_type_args(p)?;
-                    p.assert_and_bump(&P::Token::GREATER);
-                    let cur = p.input().cur();
-
-                    if !no_call && cur.is_lparen() {
-                        // possibleAsync always false here, because we would have handled it
-                        // above. (won't be any undefined arguments)
-                        let args = parse_args(p, is_dynamic_import)?;
-
-                        let obj = mut_obj_opt.take().unwrap();
-
-                        if let Callee::Expr(callee) = &obj {
-                            if let Expr::OptChain(..) = &**callee {
-                                return Ok(Some((
-                                    OptChainExpr {
-                                        span: p.span(start),
-                                        base: Box::new(OptChainBase::Call(OptCall {
-                                            span: p.span(start),
-                                            callee: obj.expect_expr(),
-                                            type_args: Some(type_args),
-                                            args,
-                                            ..Default::default()
-                                        })),
-                                        optional: false,
-                                    }
-                                    .into(),
-                                    true,
-                                )));
-                            }
+                    Ok(Some((
+                        CallExpr {
+                            span: p.span(start),
+                            callee: obj,
+                            type_args: Some(type_args),
+                            args,
+                            ..Default::default()
                         }
-
-                        Ok(Some((
-                            CallExpr {
-                                span: p.span(start),
-                                callee: obj,
-                                type_args: Some(type_args),
-                                args,
-                                ..Default::default()
-                            }
-                            .into(),
-                            true,
-                        )))
-                    } else if cur.is_no_substitution_template_literal()
-                        || cur.is_template_head()
-                        || cur.is_backquote()
-                    {
-                        p.parse_tagged_tpl(
-                            match mut_obj_opt {
+                        .into(),
+                        true,
+                    )))
+                } else if cur.is_no_substitution_template_literal()
+                    || cur.is_template_head()
+                    || cur.is_backquote()
+                {
+                    p.parse_tagged_tpl(
+                        match mut_obj_opt {
+                            Some(Callee::Expr(obj)) => obj.take(),
+                            _ => unreachable!(),
+                        },
+                        Some(type_args),
+                    )
+                    .map(|expr| (expr.into(), true))
+                    .map(Some)
+                } else if cur.is_equal() || cur.is_as() || cur.is_satisfies() {
+                    Ok(Some((
+                        TsInstantiation {
+                            span: p.span(start),
+                            expr: match mut_obj_opt {
                                 Some(Callee::Expr(obj)) => obj.take(),
                                 _ => unreachable!(),
                             },
-                            Some(type_args),
-                        )
-                        .map(|expr| (expr.into(), true))
-                        .map(Some)
-                    } else if cur.is_equal() || cur.is_as() || cur.is_satisfies() {
-                        Ok(Some((
-                            TsInstantiation {
-                                span: p.span(start),
-                                expr: match mut_obj_opt {
-                                    Some(Callee::Expr(obj)) => obj.take(),
-                                    _ => unreachable!(),
-                                },
-                                type_args,
-                            }
-                            .into(),
-                            false,
-                        )))
-                    } else if no_call {
-                        unexpected!(p, "`")
-                    } else {
-                        unexpected!(p, "( or `")
-                    }
-                })
+                            type_args,
+                        }
+                        .into(),
+                        false,
+                    )))
+                } else if no_call {
+                    unexpected!(p, "`")
+                } else {
+                    unexpected!(p, "( or `")
+                }
             });
             if let Some(result) = result {
                 return Ok(result);
@@ -710,7 +713,9 @@ fn parse_subscript<'a, P: Parser<'a>>(
         }
     }
 
-    let type_args = if p.syntax().typescript() && p.input().is(&P::Token::LESS) {
+    let type_args = if p.syntax().typescript()
+        && (p.input().is(&P::Token::LESS) || p.input().is(&P::Token::LSHIFT))
+    {
         try_parse_ts_type_args(p)
     } else {
         None
@@ -1070,9 +1075,7 @@ pub fn parse_member_expr_or_new_expr<'a>(
     p: &mut impl Parser<'a>,
     is_new_expr: bool,
 ) -> PResult<Box<Expr>> {
-    p.do_inside_of_context(Context::ShouldNotLexLtOrGtAsType, |p| {
-        parse_member_expr_or_new_expr_inner(p, is_new_expr)
-    })
+    parse_member_expr_or_new_expr_inner(p, is_new_expr)
 }
 
 fn parse_member_expr_or_new_expr_inner<'a, P: Parser<'a>>(
@@ -1133,20 +1136,20 @@ fn parse_member_expr_or_new_expr_inner<'a, P: Parser<'a>>(
             }
         }
 
-        let type_args = if p.input().syntax().typescript() && {
-            let cur = p.input().cur();
-            cur.is_less() || cur.is_lshift()
-        } {
+        let type_args = if p.input().syntax().typescript()
+            && (p.input().cur().is_less() || p.input().cur().is_lshift())
+        {
             try_parse_ts(p, |p| {
-                let args =
-                    p.do_outside_of_context(Context::ShouldNotLexLtOrGtAsType, parse_ts_type_args)?;
-                p.assert_and_bump(&P::Token::GREATER);
-                if !p.input().is(&P::Token::LPAREN) {
-                    let span = p.input().cur_span();
-                    let cur = p.input_mut().dump_cur();
-                    syntax_error!(p, span, SyntaxError::Expected('('.to_string(), cur))
-                }
-                Ok(Some(args))
+                p.do_in_generic(|p| {
+                    let args = parse_ts_type_args(p)?;
+                    p.assert_and_bump(&P::Token::GREATER);
+                    if !p.input().is(&P::Token::LPAREN) {
+                        let span = p.input().cur_span();
+                        let cur = p.input_mut().dump_cur();
+                        syntax_error!(p, span, SyntaxError::Expected('('.to_string(), cur))
+                    }
+                    Ok(Some(args))
+                })
             })
         } else {
             None
@@ -1195,7 +1198,9 @@ fn parse_member_expr_or_new_expr_inner<'a, P: Parser<'a>>(
     let obj = p.parse_primary_expr()?;
     return_if_arrow!(p, obj);
 
-    let type_args = if p.syntax().typescript() && p.input().is(&P::Token::LESS) {
+    let type_args = if p.syntax().typescript()
+        && (p.input().is(&P::Token::LESS) || p.input().is(&P::Token::LSHIFT))
+    {
         try_parse_ts_type_args(p)
     } else {
         None

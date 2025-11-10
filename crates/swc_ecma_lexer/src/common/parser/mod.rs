@@ -1,3 +1,5 @@
+use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
 use either::Either;
 use expr::{parse_assignment_expr, parse_str_lit};
 use expr_ext::ExprExt;
@@ -114,6 +116,30 @@ pub trait Parser<'a>: Sized + Clone {
             result
         } else {
             f(self)
+        }
+    }
+
+    #[inline]
+    fn do_in_generic<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let prev_depth = self.input().iter().generic_depth();
+        {
+            let iter = self.input_mut().iter_mut();
+            let new_depth = prev_depth
+                .checked_add(1)
+                .expect("generic depth overflow while entering generic context");
+            iter.set_generic_depth(new_depth);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| f(self)));
+
+        {
+            let iter = self.input_mut().iter_mut();
+            iter.set_generic_depth(prev_depth);
+        }
+
+        match result {
+            Ok(value) => value,
+            Err(err) => resume_unwind(err),
         }
     }
 

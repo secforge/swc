@@ -145,6 +145,14 @@ impl<I: swc_ecma_lexer::common::input::Tokens<TokenAndSpan>>
     fn token_flags(&self) -> swc_ecma_lexer::lexer::TokenFlags {
         self.inner.token_flags()
     }
+
+    fn generic_depth(&self) -> u8 {
+        self.inner.generic_depth()
+    }
+
+    fn set_generic_depth(&mut self, depth: u8) {
+        self.inner.set_generic_depth(depth);
+    }
 }
 
 impl<I: Tokens> Tokens for Capturing<I> {

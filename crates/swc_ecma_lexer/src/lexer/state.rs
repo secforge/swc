@@ -51,6 +51,7 @@ pub struct State {
     syntax: SyntaxFlags,
 
     token_type: Option<TokenType>,
+    pub generic_depth: u8,
 }
 
 impl State {
@@ -746,6 +747,16 @@ impl Tokens<TokenAndSpan> for Lexer<'_> {
     fn token_flags(&self) -> lexer::TokenFlags {
         Default::default()
     }
+
+    #[inline]
+    fn generic_depth(&self) -> u8 {
+        self.state.generic_depth
+    }
+
+    #[inline]
+    fn set_generic_depth(&mut self, depth: u8) {
+        self.state.generic_depth = depth;
+    }
 }
 
 impl Lexer<'_> {
@@ -904,6 +915,7 @@ impl State {
             context,
             syntax,
             token_type: None,
+            generic_depth: 0,
         }
     }
 }

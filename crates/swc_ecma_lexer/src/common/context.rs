@@ -29,43 +29,41 @@ bitflags::bitflags! {
 
       const InType = 1 << 12;
       /// Typescript extension.
-      const ShouldNotLexLtOrGtAsType = 1 << 13;
-      /// Typescript extension.
-      const InDeclare = 1 << 14;
+      const InDeclare = 1 << 13;
 
       /// If true, `:` should not be treated as a type annotation.
-      const InCondExpr = 1 << 15;
-      const WillExpectColonForCond = 1 << 16;
+      const InCondExpr = 1 << 14;
+      const WillExpectColonForCond = 1 << 15;
 
-      const InClass = 1 << 17;
+      const InClass = 1 << 16;
 
-      const InClassField = 1 << 18;
+      const InClassField = 1 << 17;
 
-      const InFunction = 1 << 19;
+      const InFunction = 1 << 18;
 
       /// This indicates current scope or the scope out of arrow function is
       /// function declaration or function expression or not.
-      const InsideNonArrowFunctionScope = 1 << 20;
+      const InsideNonArrowFunctionScope = 1 << 19;
 
-      const InParameters = 1 << 21;
+      const InParameters = 1 << 20;
 
-      const HasSuperClass = 1 << 22;
+      const HasSuperClass = 1 << 21;
 
-      const InPropertyName = 1 << 23;
+      const InPropertyName = 1 << 22;
 
-      const InForcedJsxContext = 1 << 24;
+      const InForcedJsxContext = 1 << 23;
 
       // If true, allow super.x and super[x]
-      const AllowDirectSuper = 1 << 25;
+      const AllowDirectSuper = 1 << 24;
 
-      const IgnoreElseClause = 1 << 26;
+      const IgnoreElseClause = 1 << 25;
 
-      const DisallowConditionalTypes = 1 << 27;
+      const DisallowConditionalTypes = 1 << 26;
 
-      const AllowUsingDecl = 1 << 28;
+      const AllowUsingDecl = 1 << 27;
 
-      const TopLevel = 1 << 29;
+      const TopLevel = 1 << 28;
 
-      const TsModuleBlock = 1 << 30;
+      const TsModuleBlock = 1 << 29;
   }
 }

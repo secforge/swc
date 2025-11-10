@@ -327,102 +327,102 @@ impl<I: Tokens> Parser<I> {
 
         let start = self.cur_pos();
 
-        self.do_outside_of_context(Context::ShouldNotLexLtOrGtAsType, |p| {
-            p.expect(&Token::Lt)?;
+        self.expect(&Token::Lt)?;
 
-            // Handle JSX fragment opening followed by '=': '<>='
-            // When lexer sees '>=' it combines into GtEq, but JSX fragment only needs '>'
-            // Use rescan_jsx_open_el_terminal_token to split >= back into >
-            p.input_mut().rescan_jsx_open_el_terminal_token();
+        // Handle JSX fragment opening followed by '=': '<>='
+        // When lexer sees '>=' it combines into GtEq, but JSX fragment only needs '>'
+        // Use rescan_jsx_open_el_terminal_token to split >= back into >
+        self.input_mut().rescan_jsx_open_el_terminal_token();
 
-            if p.input().cur() == &Token::Gt {
-                // <>xxxxxx</>
-                p.input_mut().scan_jsx_token(true);
-                let opening = JSXOpeningFragment {
-                    span: p.span(start),
-                };
-                let children = p.parse_jsx_children();
-                let closing = p.parse_jsx_closing_fragment(in_expr_context)?;
-                let span = p.span(start);
-                Ok(either::Either::Left(JSXFragment {
-                    span,
-                    opening,
-                    children,
-                    closing,
-                }))
-            } else {
-                let name = p.do_outside_of_context(Context::ShouldNotLexLtOrGtAsType, |p| {
-                    p.parse_jsx_element_name()
-                })?;
-                let type_args = if p.input().syntax().typescript() && p.input().is(&Token::Lt) {
-                    try_parse_ts(p, |this| {
+        if self.input().cur() == &Token::Gt {
+            // <>xxxxxx</>
+            self.input_mut().scan_jsx_token(true);
+            let opening = JSXOpeningFragment {
+                span: self.span(start),
+            };
+            let children = self.parse_jsx_children();
+            let closing = self.parse_jsx_closing_fragment(in_expr_context)?;
+            let span = self.span(start);
+            Ok(either::Either::Left(JSXFragment {
+                span,
+                opening,
+                children,
+                closing,
+            }))
+        } else {
+            let name = self.parse_jsx_element_name()?;
+            let type_args = if self.input().syntax().typescript()
+                && (self.input().is(&Token::Lt) || self.input().is(&Token::LShift))
+            {
+                try_parse_ts(self, |this| {
+                    this.do_in_generic(|this| {
                         let ret = parse_ts_type_args(this)?;
                         this.assert_and_bump(&Token::Gt);
                         Ok(Some(ret))
                     })
-                } else {
-                    None
+                })
+            } else {
+                None
+            };
+            let attrs = self.parse_jsx_attrs()?;
+            if self.input().cur() == &Token::Gt {
+                // <xxxxx>xxxxx</xxxxx>
+                self.input_mut().scan_jsx_token(true);
+                let span = Span::new_with_checked(start, self.input.get_cur().span.lo);
+                let opening = JSXOpeningElement {
+                    span,
+                    name,
+                    type_args,
+                    attrs,
+                    self_closing: false,
                 };
-                let attrs = p.parse_jsx_attrs()?;
-                if p.input().cur() == &Token::Gt {
-                    // <xxxxx>xxxxx</xxxxx>
-                    p.input_mut().scan_jsx_token(true);
-                    let span = Span::new_with_checked(start, p.input.get_cur().span.lo);
-                    let opening = JSXOpeningElement {
+                let children = self.parse_jsx_children();
+                let closing = self.parse_jsx_closing_element(in_expr_context, &opening.name)?;
+                let span = if in_expr_context {
+                    Span::new_with_checked(start, self.last_pos())
+                } else {
+                    Span::new_with_checked(start, self.cur_pos())
+                };
+                Ok(either::Either::Right(JSXElement {
+                    span,
+                    opening,
+                    children,
+                    closing: Some(closing),
+                }))
+            } else {
+                // <xxxxx/>
+                self.expect(&Token::Slash)?;
+
+                // Handle JSX self-closing tag followed by '=': '<tag/>='
+                // When lexer sees '>=' it combines into GtEq, but JSX only needs '>'
+                // Use rescan_jsx_open_el_terminal_token to split >= back into >
+                self.input_mut().rescan_jsx_open_el_terminal_token();
+                self.expect_without_advance(&Token::Gt)?;
+
+                if in_expr_context {
+                    self.bump();
+                } else {
+                    self.input_mut().scan_jsx_token(true);
+                }
+                let span = if in_expr_context {
+                    self.span(start)
+                } else {
+                    Span::new_with_checked(start, self.cur_pos())
+                };
+                Ok(either::Either::Right(JSXElement {
+                    span,
+                    opening: JSXOpeningElement {
                         span,
                         name,
                         type_args,
                         attrs,
-                        self_closing: false,
-                    };
-                    let children = p.parse_jsx_children();
-                    let closing = p.parse_jsx_closing_element(in_expr_context, &opening.name)?;
-                    let span = if in_expr_context {
-                        Span::new_with_checked(start, p.last_pos())
-                    } else {
-                        Span::new_with_checked(start, p.cur_pos())
-                    };
-                    Ok(either::Either::Right(JSXElement {
-                        span,
-                        opening,
-                        children,
-                        closing: Some(closing),
-                    }))
-                } else {
-                    // <xxxxx/>
-                    p.expect(&Token::Slash)?;
-
-                    // Handle JSX self-closing tag followed by '=': '<tag/>='
-                    // When lexer sees '>=' it combines into GtEq, but JSX only needs '>'
-                    // Use rescan_jsx_open_el_terminal_token to split >= back into >
-                    p.input_mut().rescan_jsx_open_el_terminal_token();
-                    p.expect_without_advance(&Token::Gt)?;
-
-                    if in_expr_context {
-                        p.bump();
-                    } else {
-                        p.input_mut().scan_jsx_token(true);
-                    }
-                    let span = if in_expr_context {
-                        p.span(start)
-                    } else {
-                        Span::new_with_checked(start, p.cur_pos())
-                    };
-                    Ok(either::Either::Right(JSXElement {
-                        span,
-                        opening: JSXOpeningElement {
-                            span,
-                            name,
-                            type_args,
-                            attrs,
-                            self_closing: true,
-                        },
-                        children: Vec::new(),
-                        closing: None,
-                    }))
-                }
+                        self_closing: true,
+                    },
+                    children: Vec::new(),
+                    closing: None,
+                }))
             }
-        })
+        }
     }
 }
 

@@ -466,19 +466,21 @@ pub fn parse_ts_type_args<'a, P: Parser<'a>>(p: &mut P) -> PResult<Box<TsTypePar
     debug_assert!(p.input().syntax().typescript());
 
     let start = p.input().cur_pos();
-    let params = p.in_type(|p| {
-        // Temporarily remove a JSX parsing context, which makes us scan different
-        // tokens.
-        p.ts_in_no_context(|p| {
-            if p.input().is(&P::Token::LSHIFT) {
-                p.input_mut().cut_lshift();
-            } else {
-                expect!(p, &P::Token::LESS);
-            }
-            parse_ts_delimited_list(p, ParsingContext::TypeParametersOrArguments, |p| {
-                trace_cur!(p, parse_ts_type_args__arg);
+    let params = p.do_in_generic(|p| {
+        p.in_type(|p| {
+            // Temporarily remove a JSX parsing context, which makes us scan different
+            // tokens.
+            p.ts_in_no_context(|p| {
+                if p.input().is(&P::Token::LSHIFT) {
+                    p.input_mut().cut_lshift();
+                } else {
+                    expect!(p, &P::Token::LESS);
+                }
+                parse_ts_delimited_list(p, ParsingContext::TypeParametersOrArguments, |p| {
+                    trace_cur!(p, parse_ts_type_args__arg);
 
-                parse_ts_type(p)
+                    parse_ts_type(p)
+                })
             })
         })
     })?;
@@ -505,8 +507,11 @@ pub fn parse_ts_type_ref<'a, P: Parser<'a>>(p: &mut P) -> PResult<TsTypeRef> {
     let type_params = if !p.input().had_line_break_before_cur()
         && (p.input().is(&P::Token::LESS) || p.input().is(&P::Token::LSHIFT))
     {
-        let ret = p.do_outside_of_context(Context::ShouldNotLexLtOrGtAsType, parse_ts_type_args)?;
-        p.assert_and_bump(&P::Token::GREATER);
+        let ret = p.do_in_generic(|p| {
+            let ret = parse_ts_type_args(p)?;
+            p.assert_and_bump(&P::Token::GREATER);
+            Ok(ret)
+        })?;
         Some(ret)
     } else {
         None
@@ -724,28 +729,34 @@ pub fn parse_ts_type_params<'a, P: Parser<'a>>(
     permit_in_out: bool,
     permit_const: bool,
 ) -> PResult<Box<TsTypeParamDecl>> {
-    p.in_type(|p| {
-        p.ts_in_no_context(|p| {
-            let start = p.input().cur_pos();
-            let cur = p.input().cur();
-            if !cur.is_less() && !cur.is_jsx_tag_start() {
-                unexpected!(p, "< (jsx tag start)")
-            }
-            p.bump();
+    p.do_in_generic(|p| {
+        p.in_type(|p| {
+            p.ts_in_no_context(|p| {
+                let start = p.input().cur_pos();
+                let cur = p.input().cur();
+                if !cur.is_less() && !cur.is_jsx_tag_start() {
+                    unexpected!(p, "< (jsx tag start)")
+                }
 
-            let params = parse_ts_bracketed_list(
-                p,
-                ParsingContext::TypeParametersOrArguments,
-                |p| parse_ts_type_param(p, permit_in_out, permit_const), // bracket
-                false,
-                // skip_first_token
-                true,
-            )?;
+                if p.input().is(&P::Token::LSHIFT) {
+                    p.input_mut().cut_lshift();
+                } else {
+                    p.bump();
+                }
 
-            Ok(Box::new(TsTypeParamDecl {
-                span: p.span(start),
-                params,
-            }))
+                let params = parse_ts_bracketed_list(
+                    p,
+                    ParsingContext::TypeParametersOrArguments,
+                    |p| parse_ts_type_param(p, permit_in_out, permit_const),
+                    false,
+                    true,
+                )?;
+
+                Ok(Box::new(TsTypeParamDecl {
+                    span: p.span(start),
+                    params,
+                }))
+            })
         })
     })
 }
@@ -760,7 +771,7 @@ pub fn try_parse_ts_type_params<'a, P: Parser<'a>>(
         return Ok(None);
     }
 
-    if p.input().cur().is_less() {
+    if p.input().cur().is_less() || p.input().cur().is_lshift() {
         return parse_ts_type_params(p, permit_in_out, permit_const).map(Some);
     }
 
@@ -871,8 +882,11 @@ pub(super) fn try_parse_ts_type_args<'a, P: Parser<'a>>(
     debug_assert!(p.input().syntax().typescript());
 
     try_parse_ts(p, |p| {
-        let type_args = parse_ts_type_args(p)?;
-        p.assert_and_bump(&P::Token::GREATER);
+        let type_args = p.do_in_generic(|p| {
+            let type_args = parse_ts_type_args(p)?;
+            p.assert_and_bump(&P::Token::GREATER);
+            Ok(type_args)
+        })?;
         let cur = p.input().cur();
         if cur.is_less() // invalid syntax
             || cur.is_greater() || cur.is_equal() || cur.is_rshift() || cur.is_greater_eq() || cur.is_plus() || cur.is_minus() // becomes relational expression
@@ -2220,8 +2234,11 @@ fn parse_ts_import_type<'a, P: Parser<'a>>(p: &mut P) -> PResult<TsImportType> {
     };
 
     let type_args = if p.input().is(&P::Token::LESS) {
-        let ret = p.do_outside_of_context(Context::ShouldNotLexLtOrGtAsType, parse_ts_type_args)?;
-        p.assert_and_bump(&P::Token::GREATER);
+        let ret = p.do_in_generic(|p| {
+            let ret = parse_ts_type_args(p)?;
+            p.assert_and_bump(&P::Token::GREATER);
+            Ok(ret)
+        })?;
         Some(ret)
     } else {
         None
@@ -2272,9 +2289,14 @@ fn parse_ts_type_query<'a, P: Parser<'a>>(p: &mut P) -> PResult<TsTypeQuery> {
         .map(From::from)?
     };
 
-    let type_args = if !p.input().had_line_break_before_cur() && p.input().is(&P::Token::LESS) {
-        let ret = p.do_outside_of_context(Context::ShouldNotLexLtOrGtAsType, parse_ts_type_args)?;
-        p.assert_and_bump(&P::Token::GREATER);
+    let type_args = if !p.input().had_line_break_before_cur()
+        && (p.input().is(&P::Token::LESS) || p.input().is(&P::Token::LSHIFT))
+    {
+        let ret = p.do_in_generic(|p| {
+            let ret = parse_ts_type_args(p)?;
+            p.assert_and_bump(&P::Token::GREATER);
+            Ok(ret)
+        })?;
         Some(ret)
     } else {
         None

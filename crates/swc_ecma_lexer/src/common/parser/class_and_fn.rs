@@ -63,9 +63,14 @@ pub fn parse_maybe_opt_binding_ident<'a>(
 }
 
 fn parse_maybe_decorator_args<'a, P: Parser<'a>>(p: &mut P, expr: Box<Expr>) -> PResult<Box<Expr>> {
-    let type_args = if p.input().syntax().typescript() && p.input().is(&P::Token::LESS) {
-        let ret = parse_ts_type_args(p)?;
-        p.assert_and_bump(&P::Token::GREATER);
+    let type_args = if p.input().syntax().typescript()
+        && (p.input().is(&P::Token::LESS) || p.input().is(&P::Token::LSHIFT))
+    {
+        let ret = p.do_in_generic(|p| {
+            let ret = parse_ts_type_args(p)?;
+            p.assert_and_bump(&P::Token::GREATER);
+            Ok(ret)
+        })?;
         Some(ret)
     } else {
         None
@@ -179,9 +184,14 @@ pub fn parse_super_class<'a, P: Parser<'a>>(
             // because in some cases "super class" returned by `parse_lhs_expr`
             // may not include `TsExprWithTypeArgs`
             // but it's a super class with type params, for example, in JSX.
-            if p.syntax().typescript() && p.input().is(&P::Token::LESS) {
-                let ret = parse_ts_type_args(p)?;
-                p.assert_and_bump(&P::Token::GREATER);
+            if p.syntax().typescript()
+                && (p.input().is(&P::Token::LESS) || p.input().is(&P::Token::LSHIFT))
+            {
+                let ret = p.do_in_generic(|p| {
+                    let ret = parse_ts_type_args(p)?;
+                    p.assert_and_bump(&P::Token::GREATER);
+                    Ok(ret)
+                })?;
                 Ok((super_class, Some(ret)))
             } else {
                 Ok((super_class, None))
