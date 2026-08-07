@@ -937,12 +937,12 @@ pub(super) fn next_then_parse_ts_type<'a, P: Parser<'a>>(p: &mut P) -> PResult<B
         parse_ts_type(p)
     });
 
-    if !p.ctx().contains(Context::InType) && {
-        let cur = p.input().cur();
-        cur.is_less() || cur.is_greater()
-    } {
-        p.input_mut().merge_lt_gt();
-    }
+//    if !p.ctx().contains(Context::InType) && {
+//        let cur = p.input().cur();
+//        cur.is_less() || cur.is_greater()
+//    } {
+//        p.input_mut().merge_lt_gt();
+//    }
 
     result
 }
